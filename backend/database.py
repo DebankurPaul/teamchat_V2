@@ -55,6 +55,9 @@ def init_db():
             fileName TEXT,
             fileSize TEXT,
             isPinned BOOLEAN DEFAULT 0,
+            callRoomName TEXT,
+            callStatus TEXT,
+            isVoice BOOLEAN DEFAULT 0,
             synced BOOLEAN DEFAULT 0,
             FOREIGN KEY (chat_id) REFERENCES chats (id)
         )

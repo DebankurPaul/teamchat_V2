@@ -523,25 +523,44 @@ async def join_chat(request: dict, background_tasks: BackgroundTasks):
         return {"message": "Joined new chat", "chat": new_chat}
     
     # Update existing chat
-    participants = chat_doc_data.get("participants", [])
+    # 1. Read from SQLite
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT participants FROM chats WHERE id = ?", (chat_id,))
+    row = cursor.fetchone()
+    
+    if not row:
+        # If not in SQLite but in Firestore (edge case), we might need to fetch from Firestore.
+        # But for "Local First", we assume SQLite is master or synced.
+        # If missing in SQLite, we should probably fetch from Firestore or error.
+        # Let's fallback to get_chat_doc logic if SQLite fails, OR just error if we assume full sync.
+        # Given the hybrid nature, let's try to get from SQLite.
+        pass 
+    
+    participants = []
+    if row:
+        import json
+        try:
+            participants = json.loads(row["participants"])
+        except:
+            participants = []
+            
     if not any(p.get("id") == user["id"] for p in participants):
         participants.append(user)
         
         # Update SQLite
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        import json
         cursor.execute('''
             UPDATE chats 
             SET participants = ?, synced = 0 
             WHERE id = ?
         ''', (json.dumps(participants), chat_id))
         conn.commit()
-        conn.close()
         
         background_tasks.add_task(sync_to_firebase)
+        
+    conn.close()
             
-    return {"message": "Joined chat", "chat": chat_doc_data}
+    return {"message": "Joined chat", "chat": {"id": chat_id, "participants": participants}}
 
 @app.get("/chats/{chat_id}/messages")
 async def get_messages(chat_id: int):
@@ -568,8 +587,6 @@ async def get_messages(chat_id: int):
             
         msgs.append(msg)
         
-    with open("debug.log", "a") as f:
-        f.write(f"DEBUG: get_messages returning {len(msgs)} messages. Sample: {msgs[-1] if msgs else 'None'}\n")
     return msgs
 
 @app.post("/chats/{chat_id}/messages")
@@ -582,15 +599,13 @@ async def add_message(chat_id: int, message: Message, background_tasks: Backgrou
     new_id = int(datetime.now().timestamp() * 1000)
     
     msg_dict = message.dict()
-    with open("debug.log", "a") as f:
-        f.write(f"DEBUG: add_message received: {msg_dict}\n")
     
     msg_dict["id"] = new_id
     msg_dict["isPinned"] = False
     
     cursor.execute('''
-        INSERT INTO messages (id, chat_id, text, sender, time, type, fileUrl, fileName, fileSize, isPinned, synced)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        INSERT INTO messages (id, chat_id, text, sender, time, type, fileUrl, fileName, fileSize, isPinned, callRoomName, callStatus, isVoice, synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
     ''', (
         new_id,
         chat_id,
@@ -599,9 +614,12 @@ async def add_message(chat_id: int, message: Message, background_tasks: Backgrou
         msg_dict.get("time"),
         msg_dict.get("type"),
         msg_dict.get("fileUrl"),
-        msg_dict.get("filename"), # Fix: Use 'filename' from Pydantic model
-        msg_dict.get("size"), # Fix: Use 'size' from Pydantic model (DB has fileSize, model has size)
-        0 # isPinned
+        msg_dict.get("filename"),
+        msg_dict.get("size"),
+        0, # isPinned
+        msg_dict.get("callRoomName"),
+        msg_dict.get("callStatus"),
+        msg_dict.get("isVoice", False)
     ))
     conn.commit()
     conn.close()
@@ -752,33 +770,52 @@ async def add_participant(chat_id: int, user_data: dict):
     if not user_to_add:
         raise HTTPException(status_code=404, detail="User not found")
         
-    chats_ref = db.collection("chats")
-    query = chats_ref.where("id", "==", chat_id).limit(1).stream()
+    # 1. Update SQLite
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
-    for doc in query:
-        chat_data = doc.to_dict()
-        participants = chat_data.get("participants", [])
+    # Get current participants from SQLite
+    cursor.execute("SELECT participants FROM chats WHERE id = ?", (chat_id,))
+    row = cursor.fetchone()
+    
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Chat not found")
         
-        # Check if already in chat
-        if any(p.get("id") == user_to_add["id"] for p in participants):
-             raise HTTPException(status_code=400, detail="User already in chat")
-             
-        participants.append(user_to_add)
-        
-        doc.reference.update({
-            "participants": participants,
-            "members": len(participants)
-        })
-        
-        return {"message": "User added", "user": user_to_add}
-            
-    raise HTTPException(status_code=404, detail="Chat not found")
+    import json
+    current_participants = json.loads(row["participants"])
+    
+    # Check if already in chat
+    if any(p.get("id") == user_to_add["id"] for p in current_participants):
+         conn.close()
+         raise HTTPException(status_code=400, detail="User already in chat")
+         
+    current_participants.append(user_to_add)
+    
+    cursor.execute("UPDATE chats SET participants = ?, members = ?, synced = 0 WHERE id = ?", 
+                  (json.dumps(current_participants), len(current_participants), chat_id))
+    conn.commit()
+    conn.close()
+    
+    # 2. Background Sync
+    background_tasks.add_task(sync_to_firebase)
+    
+    return {"message": "User added", "user": user_to_add}
 
 @app.get("/chats/{chat_id}/participants")
 async def get_participants(chat_id: int):
-    chat = get_chat_doc(chat_id)
-    if chat:
-        return chat.get("participants", [])
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT participants FROM chats WHERE id = ?", (chat_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        import json
+        try:
+            return json.loads(row["participants"])
+        except:
+            return []
     return []
 
 @app.post("/upload")

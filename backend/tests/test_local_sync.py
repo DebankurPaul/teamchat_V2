@@ -4,7 +4,7 @@ import time
 import json
 
 BASE_URL = "http://127.0.0.1:8000"
-DB_NAME = "backend/teamchat.db"
+DB_NAME = "teamchat.db"
 CHAT_ID = 1 # Assuming chat 1 exists
 
 def get_db_connection():

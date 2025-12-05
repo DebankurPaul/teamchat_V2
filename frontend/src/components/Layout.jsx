@@ -231,7 +231,7 @@ const Layout = () => {
   };
 
   return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden">
+    <div className="flex h-[100dvh] md:h-screen bg-gray-100 overflow-hidden">
       {/* Sidebar (Hidden on mobile if chat is selected, visible otherwise) */}
       <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-auto flex-col h-full`}>
         <Sidebar

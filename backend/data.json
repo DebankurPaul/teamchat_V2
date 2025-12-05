@@ -1,0 +1,184 @@
+{
+    "ideas": [
+        {
+            "id": 1,
+            "title": "DSA_REPORT_Debankur.pdf",
+            "category": "Design",
+            "status": "Analyzed",
+            "priority": "Medium",
+            "color": "bg-yellow-100",
+            "deadline": null,
+            "suggestion": "Extracted Content:\n\nDHEMAJI ENGINEERING COLLEGE \n \n \n \n \n \n \nDSA LABORATORY \n               REPORT \n \n \n \n \n \nSubmitted To:     Submitted By: \nDhantu Buragohain Sir    Name: Debankur Paul \nBranch: COMPUTER SCIENCE AND \nENGINEERING  \nSemester: 3rd      \nRoll Number: 2481105724 \n \n \n \n\nEXERCISE 1                   DATE \u2013 20-08-2025 \nAim: To write a C program to perform a Linear Search on an array of integers \nentered by the user. \nCode:  \n \nOutput: \n \nObservation: This algorithm checks each element sequentially until it \nfinds the desired element or reaches the end of the array. This program \ndoesn't work for duplicate elements. \n \n \n \n \n\nExercise2  Date: 20-08-2025 \nAim: To write a C program to perform a LinearSearch in an array that may contain \nduplicate elements. \nCode: \n \n \nOUTPUT: \n \n \nObservation: \nThis program checks all the numbers in the list and shows every \nposition where the searched number appears, unlike the program in \nExercise 1. \n \n \n \n\n \n \nExercise3  Date: 20-08-2025 \nAim: To write a C program that performs a BinarySearch on a sorted array \nentered by the user. \nCode: \n \nOutput: \n \n \nObservation: This program only works when the list is already sorted in \nincreasing order.It keeps dividing the list into halves to find the searched number. \nIt doesn't work if any duplicate items are entered by the user.\n \n \n\n \n \nExercise4  Date:20-08-2025 \nAim: To write a C program that performs a BinarySearch on a sorted array \ncontaining duplicate elements. \nCode: \nOutput: \n \n \nObservation: This version(unlike the program in Exercise3)finds the first and last \nposition of a number if it appears multiple times in a sorted list .\n \n \n\n \n \nExercise5  Date:19-09-2025 \nAim: To write a C program to demonstrate a stack using an array, with push and \npop functions. \nCode: \n \n \n \n\n \n \nOutput: \n \n \n \nObservation: The stack operates on a Last-In-First-Out (LIFO) principle. The last \nnumber put in the stack comes out first when popped. When we try to add/ \nremove elements to/from the stack when the stack is full/empty it shows \nappropriate messages. \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n\n \n \nExercise6  Date:24-09-2025 \n \nAim: To write a C program demonstrating the implementation of a Queue data \nstructure with functions to enqueue (insert) and dequeue (remove) elements. \nCode: \n \nOutput: \n\n \n \n \n \n \nObservation: \nThe program uses a simple array-based queue with front and rear \npointers to manage enqueue and dequeue operations.Underflowis \ndisplayed when attempting to dequeue from an empty queue, and \noverflow occurs when trying to enqueue beyond MAX. \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n\n \n \nExercise7  Date:08-10-2025 \n \nAim: To write a C program to create a singly linked list and implement insertion \noperations at the beginning, end and at a specific position of the list.  \nCode: \n \n\n \n \nOutput: \n \n \n \nObservation: \nThe function insertAtBeginning() inserts a new node at the start of \nthe list by changing the headpointer. The function insertAtEnd() \ntraverses the linked list to the last node and adds the new node at \nthe end.\n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n\n \n \nExercise8  Date:15-10-2025 \nAim: To write a C program to implement a singly linked list that supports the \nfollowing operations: insertion at the beginning, insertion at the end, insertion at \na specific position, deletion from the beginning, deletion from the end, and \ndeletion from a specific position. \nCode: \n \n \n\n \n \n \n \nOutput: \n \n \nObservation: The program successfully demonstrates the basic operations of a \nsingly linked list. It allows insertion at the beginning, end, and any specific \nposition, as well as deletion from the beginning, end, and a chosen position. The \noutput confirms that the linked list structure dynamically adjusts its nodes \naccording to the operations performed, showing how linked lists provide fle xibility \nin memory management compared to arrays.\n\n \n \nExercise9  Date:17-10-2025 \nAim: To perform different traversals on a binary tree, use the diagram given \nbelow (Figure 1) and write the code to display the in-order, pre-order, and post-\norder traversal sequences. Also ,implement a function to find and print the height \nof the  tree. \nCode: \n \n \n\n \n \n \nOutput: \n \n \n \nObservation: \nThis program builds a binarytree with several nodes and shows different \nways to visit every node, called traversals (in-order, pre-order, \npost-order). The function getHeight calculates how many steps the \nlongest path from the root to a leaf takes, which is called the height \nof the tree. \n \n \n \n \n \n \n \n \n \n\n \n \nExercise10  Date:17-10-2025 \nAim: To write a C program to create a binary search tree, display its nodes using  \nin-order traversal, and provide an option for the user to search for a value in the \ntree. \nCode: \n \n \n \n\n \n \nOutput 1: \n \nOutput 2: \n \nObservation: \nIn-order traversal is used to display the tree nodes, which ensures the \noutput is sorted in ascending order. The search operation allows the \nuser to check if a particular value exists within the tree. \n \n \n \n \n \n \n \n \n \n \n \n \n\n \n \nExercise11  Date:24-10-2025 \nAim: To write a C program for the BubbleSort algorithm. \nCode: \n \nOutput: \n \n \nObservation: The algorithm checks each pair of adjacent elements and swaps \nthem if needed, thus pushing the largest element to the end in each pass. The use \nof the isSwap flag provides an optimization by terminating early if the array \nbecomes sorted before completing all passes. \n \n \n \n\n \n \nExercise12  Date:29-10-2025 \nAim: To write a C program to implement the Selection Sort algorithm to sort an \ninteger array. \nCode: \n \nOutput: \n \n \n \n \nObservation: \nThe algorithm always finds the smallest element from the unsorted \npart and places it at the beginning. \n \n \n \n\n \n \nExercise13  Date:29-10-2025 \nAim: To implement the Insertion Sort algorithm in C++ to sort an integer array  by \nsequentially inserting each element into its correct position. \nCode: \n \n \nOutput: \n \n \n \nObservation: The element is shifted until it reaches its sorted position \nin the left part of the array. \n \n \n \n \n \n\n \n \nExercise14  Date:31-10-2025 \nAim: To write a C program to implement the QuickSort algorithm using the \npartition method and display the sorted array. \nCode: \n \n \n \n \n \n\n \n \nOutput: \n \nObservation: \nThe program uses the last element of the array as the pivot during \npartitioning. The QuickSort function applies recursion to sort the sub \narrays divided by the pivot index. \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n\n \n \nExercise15  Date:07-11-2025 \nAim: To write a C program that creates the adjacency matrix of the graph shown  \nin Figure2 and displays the matrix after adding all edges as per the structure of the \ngraph. \n \nCode: \n \n \n \n \n \n\n \n \nOutput: \n \n \n \nObservation: \nThe adjacency matrix represents the undirected graph in Figure2, \nwith each edge being reflected symmetrically in the matrix. \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n\n \n \nExercise16  Date:07-11-2025 \nAim: To write a C program that creates the adjacency list of the graph shown in  \nFigure3 and prints the list representation after adding all edges as per the figure. \nCode: \n \n \n \n\n \n \nOutput: \n \n  \nObservation: \nEach undirected edge is stored twice: once for each direction, reflecting \nthe structure of Figure 3. \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n\n \n \nExercise16  Date:14-11-2025 \nAim: To write a C program to implement the HeapSort using the heapify function. \nThe program should sort an array in ascending order. \nCode:\n \n \nOutput: \n \nObservation: \nThe program builds a maxheap from the given array and repeatedly applies heapify, \nresulting in the array being sorted in ascending order. \n \n\n"
+        }
+    ],
+    "chats": [
+        {
+            "id": 2,
+            "name": "General",
+            "lastMessage": "\ud83d\udcde Video Call started",
+            "time": "07:03 PM",
+            "unread": 0,
+            "avatar": "https://ui-avatars.com/api/?name=General&background=random",
+            "type": "group",
+            "isPrivate": false
+        },
+        {
+            "id": 1,
+            "name": "Game",
+            "lastMessage": "hi",
+            "time": "05:09 PM",
+            "unread": 0,
+            "avatar": "https://ui-avatars.com/api/?name=Game&background=random",
+            "type": "group",
+            "isPrivate": false
+        }
+    ],
+    "messages": {
+        "1": [
+            {
+                "type": "file",
+                "filename": "DSA_REPORT_Debankur.pdf",
+                "fileUrl": "http://localhost:8000/uploads/DSA_REPORT_Debankur.pdf",
+                "size": "1.6 MB",
+                "sender": "me",
+                "time": "04:59 PM",
+                "status": "sent",
+                "id": 1
+            },
+            {
+                "text": "hi",
+                "sender": "me",
+                "time": "04:59 PM",
+                "status": "sent",
+                "replyTo": null,
+                "id": 2
+            },
+            {
+                "text": "hi",
+                "sender": "me",
+                "time": "05:09 PM",
+                "status": "sent",
+                "isForwarded": true,
+                "id": 3
+            }
+        ],
+        "2": [
+            {
+                "type": "file",
+                "filename": "DSA_REPORT_Debankur.pdf",
+                "fileUrl": "http://localhost:8000/uploads/DSA_REPORT_Debankur.pdf",
+                "size": "1.6 MB",
+                "sender": "me",
+                "time": "05:06 PM",
+                "status": "sent",
+                "isForwarded": true,
+                "id": 1,
+                "isPinned": false
+            },
+            {
+                "type": "file",
+                "filename": "DSA_REPORT_Debankur.pdf",
+                "fileUrl": "http://localhost:8000/uploads/DSA_REPORT_Debankur.pdf",
+                "size": "1.6 MB",
+                "sender": "me",
+                "time": "05:06 PM",
+                "status": "sent",
+                "isForwarded": true,
+                "id": 2,
+                "isPinned": false
+            },
+            {
+                "text": "hi",
+                "sender": "me",
+                "time": "05:09 PM",
+                "status": "sent",
+                "replyTo": {
+                    "type": "file",
+                    "filename": "DSA_REPORT_Debankur.pdf",
+                    "fileUrl": "http://localhost:8000/uploads/DSA_REPORT_Debankur.pdf",
+                    "size": "1.6 MB",
+                    "sender": "me",
+                    "time": "05:06 PM",
+                    "status": "sent",
+                    "isForwarded": true,
+                    "id": 2
+                },
+                "id": 3,
+                "isPinned": false
+            },
+            {
+                "text": "hi",
+                "sender": "me",
+                "time": "06:53 PM",
+                "status": "sent",
+                "replyTo": null,
+                "id": 4,
+                "isPinned": false
+            },
+            {
+                "text": "i",
+                "sender": "me",
+                "time": "06:53 PM",
+                "status": "sent",
+                "replyTo": null,
+                "id": 5,
+                "isPinned": false
+            },
+            {
+                "text": "hi",
+                "sender": "me",
+                "time": "06:53 PM",
+                "status": "sent",
+                "replyTo": null,
+                "id": 6,
+                "isPinned": false
+            },
+            {
+                "text": "hi",
+                "sender": "me",
+                "time": "06:53 PM",
+                "status": "sent",
+                "replyTo": null,
+                "id": 7,
+                "isPinned": false
+            },
+            {
+                "text": "hi",
+                "sender": "me",
+                "time": "06:53 PM",
+                "status": "sent",
+                "replyTo": null,
+                "id": 8,
+                "isPinned": false
+            },
+            {
+                "text": "\ud83d\udcde Video Call started",
+                "type": "call",
+                "callRoomName": "TeamChat-2-1764855220990",
+                "sender": "me",
+                "time": "07:03 PM",
+                "status": "sent",
+                "id": 9
+            },
+            {
+                "text": "\ud83d\udcde Video Call started",
+                "type": "call",
+                "callRoomName": "TeamChat-2-1764855230998",
+                "sender": "me",
+                "time": "07:03 PM",
+                "status": "sent",
+                "id": 10
+            }
+        ]
+    },
+    "users": [
+        {
+            "id": 1,
+            "name": "Debankur",
+            "email": "debankurpaul618@gmail.com",
+            "avatar": "https://ui-avatars.com/api/?name=Debankur&background=random",
+            "status": "offline",
+            "lastSeen": null
+        }
+    ]
+}

@@ -1,39 +1,33 @@
 from fastapi import WebSocket
-from typing import Dict, List
+from typing import List, Dict
 import json
 
 class ConnectionManager:
     def __init__(self):
-        # user_id -> WebSocket
-        self.active_connections: Dict[str, WebSocket] = {}
+        # Store active connections: chat_id -> List[WebSocket]
+        self.active_connections: Dict[int, List[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket, user_id: str):
+    async def connect(self, websocket: WebSocket, chat_id: int):
         await websocket.accept()
-        self.active_connections[user_id] = websocket
-        await self.broadcast_status(user_id, "online")
+        if chat_id not in self.active_connections:
+            self.active_connections[chat_id] = []
+        self.active_connections[chat_id].append(websocket)
+        print(f"WS: Client connected to chat {chat_id}. Total: {len(self.active_connections[chat_id])}")
 
-    def disconnect(self, websocket: WebSocket, user_id: str):
-        if user_id in self.active_connections:
-            del self.active_connections[user_id]
-        # We can't await here easily if it's not async, but usually disconnect is called from async endpoint
-        # For now, we'll handle the broadcast in the endpoint
+    def disconnect(self, websocket: WebSocket, chat_id: int):
+        if chat_id in self.active_connections:
+            if websocket in self.active_connections[chat_id]:
+                self.active_connections[chat_id].remove(websocket)
+                print(f"WS: Client disconnected from chat {chat_id}. Total: {len(self.active_connections[chat_id])}")
+            if not self.active_connections[chat_id]:
+                del self.active_connections[chat_id]
 
-    async def broadcast(self, message: str, sender_id: str = None):
-        for user_id, connection in self.active_connections.items():
-            if user_id != sender_id:
+    async def broadcast(self, message: dict, chat_id: int):
+        if chat_id in self.active_connections:
+            print(f"WS: Broadcasting to {len(self.active_connections[chat_id])} clients in chat {chat_id}")
+            for connection in self.active_connections[chat_id]:
                 try:
-                    await connection.send_text(message)
-                except:
-                    pass
-
-    async def broadcast_status(self, user_id: str, status: str):
-        status_msg = json.dumps({
-            "type": "status_update",
-            "userId": user_id,
-            "status": status
-        })
-        for connection in self.active_connections.values():
-            try:
-                await connection.send_text(status_msg)
-            except:
-                pass
+                    await connection.send_json(message)
+                except Exception as e:
+                    print(f"WS: Error sending message: {e}")
+                    # Ideally remove dead connection here, but disconnect() handles it on close

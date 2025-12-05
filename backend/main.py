@@ -31,6 +31,9 @@ db = firestore.client()
 
 app = FastAPI()
 
+# WebSocket Manager
+manager = ConnectionManager()
+
 # Initialize Local DB
 @app.on_event("startup")
 def startup_db():
@@ -627,6 +630,9 @@ async def add_message(chat_id: int, message: Message, background_tasks: Backgrou
     # 2. Trigger Background Sync
     background_tasks.add_task(sync_to_firebase)
     
+    # 3. Broadcast via WebSocket
+    await manager.broadcast(msg_dict, chat_id)
+    
     return msg_dict
 
 def sync_clear_messages(chat_id: int):
@@ -892,17 +898,12 @@ async def analyze_file_endpoint(file_input: FileInput):
         return {"is_idea": False, "error": str(e)}
 
 
-# WebSocket for real-time (Optional: Integrate with Firestore listeners later)
-manager = ConnectionManager()
-
 @app.websocket("/ws/{chat_id}/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, chat_id: int, user_id: int):
-    await manager.connect(websocket, chat_id, user_id)
+    await manager.connect(websocket, chat_id)
     try:
         while True:
-            data = await websocket.receive_text()
-            # Here we could save to Firestore too, but we use REST for saving currently
-            # Just broadcast for now
-            await manager.broadcast(data, chat_id)
+            await websocket.receive_text()
+            # Keep connection alive
     except WebSocketDisconnect:
-        manager.disconnect(websocket, chat_id, user_id)
+        manager.disconnect(websocket, chat_id)

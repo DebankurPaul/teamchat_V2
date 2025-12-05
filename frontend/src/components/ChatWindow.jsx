@@ -135,10 +135,39 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
         };
 
         fetchMessages(); // Initial fetch
-        const interval = setInterval(fetchMessages, 3000); // Poll every 3s
 
-        return () => clearInterval(interval);
-    }, [chat.id]); // Re-run when chat changes
+        // WebSocket Connection
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = API_URL.replace('http', 'ws').replace('https', 'wss'); // Simple replacement
+        // Better URL construction:
+        const wsBase = API_URL.replace(/^http/, 'ws');
+        const socket = new WebSocket(`${wsBase}/ws/${chat.id}/${currentUser?.id || 0}`);
+
+        socket.onopen = () => {
+            console.log("WebSocket Connected");
+        };
+
+        socket.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            setMessages(prev => {
+                // Avoid duplicates
+                if (prev.some(m => m.id === msg.id)) return prev;
+                return [...prev, msg];
+            });
+        };
+
+        socket.onclose = () => {
+            console.log("WebSocket Disconnected");
+        };
+
+        // Keep polling as backup (slower interval)
+        const interval = setInterval(fetchMessages, 10000);
+
+        return () => {
+            socket.close();
+            clearInterval(interval);
+        };
+    }, [chat.id, currentUser]); // Re-run when chat changes
 
     useEffect(() => {
         // Fetch participants if it's a group to get accurate count

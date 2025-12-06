@@ -5,13 +5,8 @@ import FilePreviewModal from './FilePreviewModal';
 import ConfirmationModal from './ConfirmationModal';
 
 const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteChat }) => {
-    // Dynamic API URL for local network access
-    const getApiUrl = () => {
-        if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
-        // Fallback: Use current hostname (e.g., 192.168.x.x) with backend port 8000
-        return `http://${window.location.hostname}:8000`;
-    };
-    const API_URL = getApiUrl();
+    // Dynamic API URL
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const [message, setMessage] = useState('');
     const [messages, setMessages] = useState([]);
     const [callRoomName, setCallRoomName] = useState(null); // State for active call room
@@ -77,7 +72,7 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                 filename: file.name,
                 fileUrl: data.url,
                 size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-                sender: 'me',
+                sender: currentUser?.id || 'me',
                 time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 status: 'sent',
                 text: caption || null // Add caption if provided
@@ -170,23 +165,29 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
     }, [chat.id, currentUser]); // Re-run when chat changes
 
     useEffect(() => {
-        // Fetch participants if it's a group to get accurate count
-        if (chat.type === 'group') {
-            fetch(`${API_URL}/chats/${chat.id}/participants`)
-                .then(res => res.json())
-                .then(data => {
-                    // Ensure current user is included in the list
-                    if (currentUser && !data.some(p => p.id === currentUser.id)) {
-                        data.push({
-                            ...currentUser,
-                            avatar: currentUser.avatar || `https://ui-avatars.com/api/?name=${currentUser.name}&background=random`
-                        });
-                    }
-                    setParticipants(data);
-                })
-                .catch(err => console.error("Failed to fetch participants", err));
-        }
+        // Always fetch participants to resolve names correctly (for DM and Group)
+        fetch(`${API_URL}/chats/${chat.id}/participants`)
+            .then(res => res.json())
+            .then(data => {
+                // Ensure current user is included in the list
+                if (currentUser && !data.some(p => p.id === currentUser.id)) {
+                    data.push({
+                        ...currentUser,
+                        avatar: currentUser.avatar || `https://ui-avatars.com/api/?name=${currentUser.name}&background=random`
+                    });
+                }
+                setParticipants(data);
+            })
+            .catch(err => console.error("Failed to fetch participants", err));
     }, [chat.id, chat.type]);
+
+    const getSenderName = (senderId) => {
+        if (senderId === 'me' || String(senderId) === String(currentUser?.id)) return 'You';
+        const p = participants.find(p => String(p.id) === String(senderId));
+        if (p) return p.name;
+        if (chat.type !== 'group') return chat.name;
+        return `User ${senderId}`;
+    };
 
     useEffect(scrollToBottom, [messages]);
 
@@ -195,7 +196,7 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
 
         const newMessage = {
             text: message,
-            sender: 'me',
+            sender: currentUser?.id || 'me',
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             status: 'sent',
             replyTo: replyingTo
@@ -223,7 +224,7 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
             text: "📞 Video Call started",
             type: 'call',
             callRoomName: roomName,
-            sender: 'me',
+            sender: currentUser?.id || 'me',
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             status: 'sent'
         };
@@ -250,7 +251,7 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
             text: "📞 Voice Call started",
             type: 'call',
             callRoomName: roomName,
-            sender: 'me',
+            sender: currentUser?.id || 'me',
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             status: 'sent',
             isVoice: true
@@ -604,153 +605,189 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                         </div>
                     </div>
                 )}
-                {messages.map((msg) => (
-                    <div key={msg.id} id={`msg-${msg.id}`} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'} group/msg transition-colors duration-500 rounded-lg`}>
-                        <div className={`max-w-[85%] md:max-w-[70%] rounded-lg px-4 py-2 shadow-sm relative ${msg.sender === 'me' ? 'bg-teal-100 rounded-tr-none' : 'bg-white rounded-tl-none'}`}>
+                {messages.map((msg) => {
+                    // Fix: Use String conversion to handle '1' vs 1 mismatch
+                    const isMe = msg.sender === 'me' || String(msg.sender) === String(currentUser?.id);
 
-                            {/* Message Actions Dropdown Trigger (Hover) */}
-                            {/* Removed separate trigger, now integrated into actions menu */}
+                    // Defensive parsing for replyTo (handles both Object and String from backend)
+                    let replyData = msg.replyTo;
+                    if (typeof replyData === 'string') {
+                        try {
+                            replyData = JSON.parse(replyData);
+                        } catch (e) {
+                            console.error("Failed to parse replyTo:", e);
+                            replyData = null;
+                        }
+                    }
+                    return (
+                        <div key={msg.id} id={`msg-${msg.id}`} className={`flex ${isMe ? 'justify-end' : 'justify-start'} group/msg transition-colors duration-500 rounded-lg`}>
+                            <div className={`max-w-[85%] md:max-w-[70%] rounded-lg px-4 py-2 shadow-sm relative ${isMe ? 'bg-teal-100 rounded-tr-none' : 'bg-white rounded-tl-none'}`}>
 
-                            {/* Reply Context */}
-                            {msg.replyTo && (
-                                <div className="mb-2 p-2 bg-black bg-opacity-5 rounded text-xs border-l-4 border-teal-500">
-                                    <p className="font-bold text-teal-700">{msg.replyTo.sender === 'me' ? 'You' : chat.name}</p>
-                                    <p className="truncate text-gray-600">{msg.replyTo.text || msg.replyTo.filename}</p>
-                                </div>
-                            )}
+                                {/* Sender Name (for Groups & Others) */}
+                                {!isMe && chat.type === 'group' && (
+                                    <p className="text-xs font-bold text-orange-500 mb-1">
+                                        {participants.find(p => String(p.id) === String(msg.sender))?.name || `User ${msg.sender}`}
+                                    </p>
+                                )}
 
-                            {/* Forwarded Label */}
-                            {msg.isForwarded && (
-                                <div className="flex items-center text-xs text-gray-500 mb-1 italic">
-                                    <Forward size={10} className="mr-1" /> Forwarded
-                                </div>
-                            )}
+                                {/* Message Actions Dropdown Trigger (Hover) */}
+                                {/* Removed separate trigger, now integrated into actions menu */}
 
-                            {/* Message Content */}
-                            {msg.type === 'file' ? (
-                                <div
-                                    className="flex items-center space-x-3 cursor-pointer hover:bg-black/5 p-2 rounded-lg transition-colors relative group/file"
-                                    onClick={async (e) => {
-                                        e.stopPropagation();
-                                        if (!msg.fileUrl) {
-                                            alert("File URL missing");
-                                            return;
-                                        }
-
-                                        // URL Construction Logic
-                                        let fileUrl = msg.fileUrl;
-                                        console.log("Original URL:", fileUrl);
-                                        console.log("API_URL:", API_URL);
-
-                                        if (fileUrl.includes('localhost:8000')) {
-                                            fileUrl = fileUrl.replace(/http:\/\/localhost:8000/g, API_URL).replace(/http:\/\/127.0.0.1:8000/g, API_URL);
-                                        } else if (!fileUrl.startsWith('http')) {
-                                            fileUrl = `${API_URL}${fileUrl}`;
-                                        }
-                                        console.log("Final URL:", fileUrl);
-
-                                        // Check file type
-                                        const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(msg.filename);
-
-                                        if (isImage) {
-                                            window.open(fileUrl, '_blank');
-                                        } else {
-                                            // Download
-                                            try {
-                                                const response = await fetch(fileUrl);
-                                                if (!response.ok) throw new Error('Download failed');
-                                                const blob = await response.blob();
-                                                const url = window.URL.createObjectURL(blob);
-                                                const link = document.createElement('a');
-                                                link.href = url;
-                                                link.download = msg.filename || 'download';
-                                                document.body.appendChild(link);
-                                                link.click();
-                                                document.body.removeChild(link);
-                                                window.URL.revokeObjectURL(url);
-                                            } catch (error) {
-                                                console.error("Download error:", error);
-                                                alert("Failed to download file.");
+                                {/* Reply Context */}
+                                {replyData && (
+                                    <div
+                                        className="mb-2 p-2 bg-black bg-opacity-5 rounded text-xs border-l-4 border-teal-500 cursor-pointer hover:bg-black/10 transition-colors"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const el = document.getElementById(`msg-${replyData.id}`);
+                                            if (el) {
+                                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                // Optional: Highlight effect
+                                                el.classList.add('bg-yellow-100');
+                                                setTimeout(() => el.classList.remove('bg-yellow-100'), 1000);
                                             }
-                                        }
-                                    }}
-                                >
-                                    <div className={`p-2 rounded-lg ${/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.filename) ? 'bg-purple-100 text-purple-500' : 'bg-red-100 text-red-500'}`}>
-                                        {/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.filename) ? <Image size={24} /> : <Paperclip size={24} />}
+                                        }}
+                                    >
+                                        <p className="font-bold text-teal-700">
+                                            {getSenderName(replyData.sender)}
+                                        </p>
+                                        <p className="truncate text-gray-600">{replyData.text || replyData.filename}</p>
                                     </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="font-medium text-gray-800 truncate text-sm">{msg.filename || "Unknown File"}</p>
-                                        <p className="text-xs text-gray-500">{msg.size || "Unknown size"}</p>
+                                )}
+
+                                {/* Forwarded Label */}
+                                {msg.isForwarded && (
+                                    <div className="flex items-center text-xs text-gray-500 mb-1 italic">
+                                        <Forward size={10} className="mr-1" /> Forwarded
                                     </div>
-                                    <button className="opacity-0 group-hover/file:opacity-100 absolute -left-10 top-2 bg-yellow-100 text-yellow-700 p-1.5 rounded-full shadow-sm hover:bg-yellow-200 transition-opacity" title="Mark as Idea" onClick={(e) => { e.stopPropagation(); handleAnalyzeFile(msg.filename); }}>
-                                        <Lightbulb size={16} />
-                                    </button>
-                                </div>
-                            ) : msg.type === 'call' ? (
-                                <div className="flex flex-col space-y-2 p-2 w-full">
-                                    <div className={`flex items-center justify-center space-x-2 font-medium ${msg.callStatus === 'ended' ? 'text-gray-500' : 'text-gray-800'}`}>
-                                        {msg.callStatus === 'ended' ? <PhoneOff size={20} /> : (msg.isVoice ? <Phone size={20} className="text-teal-600" /> : <Video size={20} className="text-teal-600" />)}
-                                        <span>{msg.callStatus === 'ended' ? "Call Ended" : (msg.isVoice ? "Voice Call started" : "Video Call started")}</span>
-                                    </div>
-                                    {msg.callStatus !== 'ended' && (
-                                        <div className="flex flex-col space-y-1 w-full">
-                                            <button
-                                                onClick={() => {
-                                                    setCallRoomName(msg.callRoomName);
-                                                    setIsVoiceCall(msg.isVoice);
-                                                }}
-                                                className="bg-teal-500 text-white px-4 py-2 rounded-full text-sm font-bold hover:bg-teal-600 transition-colors w-full"
-                                            >
-                                                Join Call
-                                            </button>
-                                            {msg.sender === 'me' && (
-                                                <button
-                                                    onClick={() => handleEndMeeting(msg.id)}
-                                                    className="bg-red-100 text-red-600 px-4 py-1 rounded-full text-xs font-semibold hover:bg-red-200 transition-colors w-full"
-                                                >
-                                                    End for Everyone
-                                                </button>
-                                            )}
+                                )}
+
+                                {/* Message Content */}
+                                {msg.type === 'file' ? (
+                                    <div
+                                        className="flex items-center space-x-3 cursor-pointer hover:bg-black/5 p-2 rounded-lg transition-colors relative group/file"
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            if (!msg.fileUrl) {
+                                                alert("File URL missing");
+                                                return;
+                                            }
+
+                                            // URL Construction Logic
+                                            let fileUrl = msg.fileUrl;
+                                            console.log("Original URL:", fileUrl);
+                                            console.log("API_URL:", API_URL);
+
+                                            if (fileUrl.includes('localhost:8000')) {
+                                                fileUrl = fileUrl.replace(/http:\/\/localhost:8000/g, API_URL).replace(/http:\/\/127.0.0.1:8000/g, API_URL);
+                                            } else if (!fileUrl.startsWith('http')) {
+                                                fileUrl = `${API_URL}${fileUrl}`;
+                                            }
+                                            console.log("Final URL:", fileUrl);
+
+                                            // Check file type
+                                            const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(msg.filename);
+
+                                            if (isImage) {
+                                                window.open(fileUrl, '_blank');
+                                            } else {
+                                                // Download
+                                                try {
+                                                    const response = await fetch(fileUrl);
+                                                    if (!response.ok) throw new Error('Download failed');
+                                                    const blob = await response.blob();
+                                                    const url = window.URL.createObjectURL(blob);
+                                                    const link = document.createElement('a');
+                                                    link.href = url;
+                                                    link.download = msg.filename || 'download';
+                                                    document.body.appendChild(link);
+                                                    link.click();
+                                                    document.body.removeChild(link);
+                                                    window.URL.revokeObjectURL(url);
+                                                } catch (error) {
+                                                    console.error("Download error:", error);
+                                                    alert("Failed to download file.");
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        <div className={`p-2 rounded-lg ${/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.filename) ? 'bg-purple-100 text-purple-500' : 'bg-red-100 text-red-500'}`}>
+                                            {/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.filename) ? <Image size={24} /> : <Paperclip size={24} />}
                                         </div>
-                                    )}
+                                        <div className="flex-1 min-w-0">
+                                            <p className="font-medium text-gray-800 truncate text-sm">{msg.filename || "Unknown File"}</p>
+                                            <p className="text-xs text-gray-500">{msg.size || "Unknown size"}</p>
+                                        </div>
+                                        <button className="opacity-0 group-hover/file:opacity-100 absolute -left-10 top-2 bg-yellow-100 text-yellow-700 p-1.5 rounded-full shadow-sm hover:bg-yellow-200 transition-opacity" title="Mark as Idea" onClick={(e) => { e.stopPropagation(); handleAnalyzeFile(msg.filename); }}>
+                                            <Lightbulb size={16} />
+                                        </button>
+                                    </div>
+                                ) : msg.type === 'call' ? (
+                                    <div className="flex flex-col space-y-2 p-2 w-full">
+                                        <div className={`flex items-center justify-center space-x-2 font-medium ${msg.callStatus === 'ended' ? 'text-gray-500' : 'text-gray-800'}`}>
+                                            {msg.callStatus === 'ended' ? <PhoneOff size={20} /> : (msg.isVoice ? <Phone size={20} className="text-teal-600" /> : <Video size={20} className="text-teal-600" />)}
+                                            <span>{msg.callStatus === 'ended' ? "Call Ended" : (msg.isVoice ? "Voice Call started" : "Video Call started")}</span>
+                                        </div>
+                                        {msg.callStatus !== 'ended' && (
+                                            <div className="flex flex-col space-y-1 w-full">
+                                                <button
+                                                    onClick={() => {
+                                                        setCallRoomName(msg.callRoomName);
+                                                        setIsVoiceCall(msg.isVoice);
+                                                    }}
+                                                    className="bg-teal-500 text-white px-4 py-2 rounded-full text-sm font-bold hover:bg-teal-600 transition-colors w-full"
+                                                >
+                                                    Join Call
+                                                </button>
+                                                {isMe && (
+                                                    <button
+                                                        onClick={() => handleEndMeeting(msg.id)}
+                                                        className="bg-red-100 text-red-600 px-4 py-1 rounded-full text-xs font-semibold hover:bg-red-200 transition-colors w-full"
+                                                    >
+                                                        End for Everyone
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="relative">
+                                        <p className="text-sm text-gray-800">{msg.text}</p>
+                                        <button className="opacity-0 group-hover/msg:opacity-100 absolute -left-10 top-0 bg-yellow-100 text-yellow-700 p-1.5 rounded-full shadow-sm hover:bg-yellow-200 transition-opacity" title="Mark as Idea" onClick={() => handleAnalyzeMessage(msg.text, msg.sender)}>
+                                            <Lightbulb size={16} />
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Metadata & Actions */}
+                                <div className="flex justify-between items-center mt-1 space-x-2">
+                                    <span className="text-[10px] text-gray-500">{msg.time}</span>
+                                    {isMe && <span className="text-teal-500 text-[10px]">✓✓</span>}
                                 </div>
-                            ) : (
-                                <div className="relative">
-                                    <p className="text-sm text-gray-800">{msg.text}</p>
-                                    <button className="opacity-0 group-hover/msg:opacity-100 absolute -left-10 top-0 bg-yellow-100 text-yellow-700 p-1.5 rounded-full shadow-sm hover:bg-yellow-200 transition-opacity" title="Mark as Idea" onClick={() => handleAnalyzeMessage(msg.text, msg.sender)}>
-                                        <Lightbulb size={16} />
+
+                                {/* Message Actions (Reply/Delete/Forward/Pin) - Visible on Hover */}
+                                <div className={`absolute ${isMe ? '-left-36' : '-right-36'} top-0 opacity-0 group-hover/msg:opacity-100 flex space-x-1 bg-white shadow-sm rounded-lg p-1 transition-opacity z-10`}>
+                                    <button onClick={() => setReplyingTo(msg)} className="p-1 hover:bg-gray-100 rounded text-gray-600" title="Reply">
+                                        <Reply size={14} />
+                                    </button>
+                                    <button onClick={() => { setMessageToForward(msg); setShowForwardModal(true); }} className="p-1 hover:bg-gray-100 rounded text-gray-600" title="Forward">
+                                        <Forward size={14} />
+                                    </button>
+                                    <button
+                                        onClick={() => handlePinMessage(msg.id)}
+                                        className={`p-1 hover:bg-gray-100 rounded ${msg.isPinned ? 'text-teal-600' : 'text-gray-600'}`}
+                                        title={msg.isPinned ? "Unpin" : "Pin"}
+                                    >
+                                        <Pin size={14} />
+                                    </button>
+                                    <button onClick={() => handleDeleteMessage(msg.id, true)} className="p-1 hover:bg-gray-100 rounded text-red-500" title="Delete">
+                                        <Trash2 size={14} />
                                     </button>
                                 </div>
-                            )}
-
-                            {/* Metadata & Actions */}
-                            <div className="flex justify-between items-center mt-1 space-x-2">
-                                <span className="text-[10px] text-gray-500">{msg.time}</span>
-                                {msg.sender === 'me' && <span className="text-teal-500 text-[10px]">✓✓</span>}
-                            </div>
-
-                            {/* Message Actions (Reply/Delete/Forward/Pin) - Visible on Hover */}
-                            <div className={`absolute ${msg.sender === 'me' ? '-left-36' : '-right-36'} top-0 opacity-0 group-hover/msg:opacity-100 flex space-x-1 bg-white shadow-sm rounded-lg p-1 transition-opacity z-10`}>
-                                <button onClick={() => setReplyingTo(msg)} className="p-1 hover:bg-gray-100 rounded text-gray-600" title="Reply">
-                                    <Reply size={14} />
-                                </button>
-                                <button onClick={() => { setMessageToForward(msg); setShowForwardModal(true); }} className="p-1 hover:bg-gray-100 rounded text-gray-600" title="Forward">
-                                    <Forward size={14} />
-                                </button>
-                                <button
-                                    onClick={() => handlePinMessage(msg.id)}
-                                    className={`p-1 hover:bg-gray-100 rounded ${msg.isPinned ? 'text-teal-600' : 'text-gray-600'}`}
-                                    title={msg.isPinned ? "Unpin" : "Pin"}
-                                >
-                                    <Pin size={14} />
-                                </button>
-                                <button onClick={() => handleDeleteMessage(msg.id, true)} className="p-1 hover:bg-gray-100 rounded text-red-500" title="Delete">
-                                    <Trash2 size={14} />
-                                </button>
                             </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
                 <div ref={messagesEndRef} />
             </div>
 
@@ -758,8 +795,16 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
             {
                 replyingTo && (
                     <div className="bg-gray-50 px-4 py-2 border-t border-gray-200 flex justify-between items-center">
-                        <div className="border-l-4 border-teal-500 pl-2">
-                            <p className="text-xs font-bold text-teal-600">Replying to {replyingTo.sender === 'me' ? 'yourself' : chat.name}</p>
+                        <div
+                            className="border-l-4 border-teal-500 pl-2 cursor-pointer"
+                            onClick={() => {
+                                const el = document.getElementById(`msg-${replyingTo.id}`);
+                                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }}
+                        >
+                            <p className="text-xs font-bold text-teal-600">
+                                Replying to {getSenderName(replyingTo.sender)}
+                            </p>
                             <p className="text-sm text-gray-600 truncate">{replyingTo.text || replyingTo.filename}</p>
                         </div>
                         <button onClick={() => setReplyingTo(null)} className="text-gray-500 hover:text-gray-700">
@@ -813,127 +858,133 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
             </div>
 
             {/* Forward Modal */}
-            {showForwardModal && (
-                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl flex flex-col max-h-[80vh]">
-                        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-                            <h3 className="text-lg font-bold text-gray-800">Forward to...</h3>
-                            <button onClick={() => setShowForwardModal(false)} className="text-gray-500 hover:text-gray-700">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-2">
-                            {chats.map((c) => (
-                                <div
-                                    key={c.id}
-                                    onClick={() => handleForwardMessage(c.id)}
-                                    className="flex items-center p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
-                                >
-                                    <img src={c.avatar} alt={c.name} className="w-10 h-10 rounded-full mr-3" />
-                                    <span className="font-medium text-gray-800">{c.name}</span>
-                                </div>
-                            ))}
+            {
+                showForwardModal && (
+                    <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl flex flex-col max-h-[80vh]">
+                            <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+                                <h3 className="text-lg font-bold text-gray-800">Forward to...</h3>
+                                <button onClick={() => setShowForwardModal(false)} className="text-gray-500 hover:text-gray-700">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-2">
+                                {chats.map((c) => (
+                                    <div
+                                        key={c.id}
+                                        onClick={() => handleForwardMessage(c.id)}
+                                        className="flex items-center p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
+                                    >
+                                        <img src={c.avatar} alt={c.name} className="w-10 h-10 rounded-full mr-3" />
+                                        <span className="font-medium text-gray-800">{c.name}</span>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* Add Member Modal */}
-            {showAddMemberModal && (
-                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl flex flex-col p-6 animate-scale-in">
-                        <h3 className="text-lg font-bold text-gray-800 mb-4">Add Member</h3>
-                        <p className="text-sm text-gray-600 mb-4">Enter the email of the user you want to add to this group.</p>
-                        <input
-                            type="email"
-                            value={addMemberEmail}
-                            onChange={(e) => setAddMemberEmail(e.target.value)}
-                            placeholder="user@example.com"
-                            className="w-full border border-gray-300 rounded-lg px-4 py-2 mb-6 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                            autoFocus
-                        />
-                        <div className="flex justify-end space-x-3">
-                            <button
-                                onClick={() => setShowAddMemberModal(false)}
-                                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={submitAddMember}
-                                className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors font-medium"
-                            >
-                                Add
-                            </button>
+            {
+                showAddMemberModal && (
+                    <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-xl w-full max-w-sm shadow-2xl flex flex-col p-6 animate-scale-in">
+                            <h3 className="text-lg font-bold text-gray-800 mb-4">Add Member</h3>
+                            <p className="text-sm text-gray-600 mb-4">Enter the email of the user you want to add to this group.</p>
+                            <input
+                                type="email"
+                                value={addMemberEmail}
+                                onChange={(e) => setAddMemberEmail(e.target.value)}
+                                placeholder="user@example.com"
+                                className="w-full border border-gray-300 rounded-lg px-4 py-2 mb-6 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                autoFocus
+                            />
+                            <div className="flex justify-end space-x-3">
+                                <button
+                                    onClick={() => setShowAddMemberModal(false)}
+                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={submitAddMember}
+                                    className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors font-medium"
+                                >
+                                    Add
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* Group Info Side Panel */}
-            {showParticipantsModal && (
-                <div className="absolute top-0 right-0 h-full w-80 bg-[#111b21] shadow-xl z-20 border-l border-gray-700 flex flex-col animate-slide-in-right text-gray-300">
-                    {/* Header */}
-                    <div className="h-16 px-4 flex items-center justify-between bg-[#202c33] border-b border-gray-700">
-                        <div className="flex items-center">
-                            <button onClick={() => setShowParticipantsModal(false)} className="mr-4 text-gray-400 hover:text-white">
-                                <X size={24} />
-                            </button>
-                            <h3 className="text-lg font-medium text-white">Group info</h3>
-                        </div>
-                    </div>
-
-                    {/* Content */}
-                    <div className="flex-1 overflow-y-auto custom-scrollbar">
-                        {/* Group Profile */}
-                        <div className="flex flex-col items-center p-6 bg-[#111b21] border-b border-gray-800">
-                            <img src={chat.avatar} alt={chat.name} className="w-32 h-32 rounded-full mb-4 object-cover" />
-                            <h2 className="text-xl font-semibold text-white mb-1 text-center">{chat.name}</h2>
-                            <p className="text-sm text-gray-500 mb-2">Group • {participants.length} members</p>
+            {
+                showParticipantsModal && (
+                    <div className="absolute top-0 right-0 h-full w-80 bg-[#111b21] shadow-xl z-20 border-l border-gray-700 flex flex-col animate-slide-in-right text-gray-300">
+                        {/* Header */}
+                        <div className="h-16 px-4 flex items-center justify-between bg-[#202c33] border-b border-gray-700">
+                            <div className="flex items-center">
+                                <button onClick={() => setShowParticipantsModal(false)} className="mr-4 text-gray-400 hover:text-white">
+                                    <X size={24} />
+                                </button>
+                                <h3 className="text-lg font-medium text-white">Group info</h3>
+                            </div>
                         </div>
 
-                        {/* Description/About (Mock) */}
-                        <div className="p-4 bg-[#111b21] border-b border-gray-800">
-                            <p className="text-sm text-teal-500 mb-1">Description</p>
-                            <p className="text-sm text-gray-300">Welcome to the official group for {chat.name}. Share ideas and collaborate!</p>
-                        </div>
-
-                        {/* Members List */}
-                        <div className="p-2">
-                            <div className="px-4 py-2 text-sm text-teal-500 font-medium">{participants.length} members</div>
-
-                            {/* Add Member Option */}
-                            <div className="flex items-center p-3 hover:bg-[#202c33] rounded-lg cursor-pointer transition-colors" onClick={handleAddMember}>
-                                <div className="w-10 h-10 rounded-full bg-teal-600 flex items-center justify-center mr-3">
-                                    <Users size={20} className="text-white" />
-                                </div>
-                                <div className="flex-1">
-                                    <p className="text-white font-medium">Add member</p>
-                                </div>
+                        {/* Content */}
+                        <div className="flex-1 overflow-y-auto custom-scrollbar">
+                            {/* Group Profile */}
+                            <div className="flex flex-col items-center p-6 bg-[#111b21] border-b border-gray-800">
+                                <img src={chat.avatar} alt={chat.name} className="w-32 h-32 rounded-full mb-4 object-cover" />
+                                <h2 className="text-xl font-semibold text-white mb-1 text-center">{chat.name}</h2>
+                                <p className="text-sm text-gray-500 mb-2">Group • {participants.length} members</p>
                             </div>
 
-                            {/* Participants */}
-                            {participants.map((p) => (
-                                <div key={p.id} className="flex items-center p-3 hover:bg-[#202c33] rounded-lg cursor-pointer transition-colors group">
-                                    <img src={p.avatar} alt={p.name} className="w-10 h-10 rounded-full mr-3" />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex justify-between items-baseline">
-                                            <p className="text-white font-medium truncate">
-                                                {p.id === currentUser?.id ? "You" : p.name}
-                                            </p>
-                                            {/* Admin Tag Mock */}
-                                            {p.id === 1 && <span className="text-xs text-teal-500 border border-teal-500 px-1 rounded ml-2">Group admin</span>}
-                                        </div>
-                                        <p className="text-xs text-gray-500 truncate">
-                                            {p.id === currentUser?.id ? "Available" : (userStatuses[p.id]?.status === 'online' ? 'Online' : `Last seen ${userStatuses[p.id]?.lastSeen || 'recently'}`)}
-                                        </p>
+                            {/* Description/About (Mock) */}
+                            <div className="p-4 bg-[#111b21] border-b border-gray-800">
+                                <p className="text-sm text-teal-500 mb-1">Description</p>
+                                <p className="text-sm text-gray-300">Welcome to the official group for {chat.name}. Share ideas and collaborate!</p>
+                            </div>
+
+                            {/* Members List */}
+                            <div className="p-2">
+                                <div className="px-4 py-2 text-sm text-teal-500 font-medium">{participants.length} members</div>
+
+                                {/* Add Member Option */}
+                                <div className="flex items-center p-3 hover:bg-[#202c33] rounded-lg cursor-pointer transition-colors" onClick={handleAddMember}>
+                                    <div className="w-10 h-10 rounded-full bg-teal-600 flex items-center justify-center mr-3">
+                                        <Users size={20} className="text-white" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="text-white font-medium">Add member</p>
                                     </div>
                                 </div>
-                            ))}
+
+                                {/* Participants */}
+                                {participants.map((p) => (
+                                    <div key={p.id} className="flex items-center p-3 hover:bg-[#202c33] rounded-lg cursor-pointer transition-colors group">
+                                        <img src={p.avatar} alt={p.name} className="w-10 h-10 rounded-full mr-3" />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex justify-between items-baseline">
+                                                <p className="text-white font-medium truncate">
+                                                    {p.id === currentUser?.id ? "You" : p.name}
+                                                </p>
+                                                {/* Admin Tag Mock */}
+                                                {p.id === 1 && <span className="text-xs text-teal-500 border border-teal-500 px-1 rounded ml-2">Group admin</span>}
+                                            </div>
+                                            <p className="text-xs text-gray-500 truncate">
+                                                {p.id === currentUser?.id ? "Available" : (userStatuses[p.id]?.status === 'online' ? 'Online' : `Last seen ${userStatuses[p.id]?.lastSeen || 'recently'}`)}
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
             {/* Confirmation Modal */}
             <ConfirmationModal
                 isOpen={confirmation.isOpen}
@@ -944,7 +995,7 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                 isDanger={confirmation.isDanger}
                 confirmText={confirmation.confirmText}
             />
-        </div>
+        </div >
     );
 };
 

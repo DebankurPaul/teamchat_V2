@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, MoreVertical, MessageSquare, Lightbulb, Calendar, User, Plus, Users, Link as LinkIcon, Lock, Globe, LogOut, Star, CheckSquare, UserPlus, X, Trash2 } from 'lucide-react';
 
-const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup, activeTab, onTabChange, onLogout }) => {
+const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup, activeTab, onTabChange, onLogout, currentUser, onBulkDelete }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [showCreateGroup, setShowCreateGroup] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
@@ -208,9 +208,12 @@ const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup
             case 'profile':
                 return (
                     <div className="p-6 flex flex-col items-center">
-                        <img src="https://ui-avatars.com/api/?name=Me&background=random" className="w-24 h-24 rounded-full mb-4" alt="Profile" />
-                        <h2 className="text-xl font-bold text-gray-800">My Profile</h2>
-                        <p className="text-gray-500">Online</p>
+                        <div className="w-24 h-24 rounded-full mb-4 bg-orange-500 flex items-center justify-center text-4xl text-white font-bold">
+                            {currentUser?.name?.charAt(0).toUpperCase()}
+                        </div>
+                        <h2 className="text-xl font-bold text-gray-800">{currentUser?.name || "User"}</h2>
+                        <p className="text-gray-500">{currentUser?.email}</p>
+                        <p className="text-gray-400 text-sm mt-1">Online</p>
                         <button onClick={onLogout} className="mt-6 w-full bg-red-50 text-red-600 py-2 rounded-lg hover:bg-red-100">
                             Logout
                         </button>
@@ -234,7 +237,11 @@ const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup
                             <span className="font-bold text-gray-700">{selectedChatIds.length} selected</span>
                         </div>
                         {selectedChatIds.length > 0 && (
-                            <button className="p-2 hover:bg-red-100 text-red-600 rounded-full" title="Delete selected">
+                            <button
+                                onClick={() => { onBulkDelete(selectedChatIds); setIsSelectionMode(false); }}
+                                className="p-2 hover:bg-red-100 text-red-600 rounded-full"
+                                title="Delete selected"
+                            >
                                 <Trash2 size={20} />
                             </button>
                         )}
@@ -242,7 +249,12 @@ const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup
                 ) : (
                     <>
                         <div className="flex items-center space-x-2">
-                            <img src="https://ui-avatars.com/api/?name=Me&background=random" className="w-8 h-8 rounded-full cursor-pointer" onClick={() => onTabChange('profile')} />
+                            <div
+                                className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center text-white text-xs font-bold cursor-pointer hover:opacity-90 transition-opacity"
+                                onClick={() => onTabChange('profile')}
+                            >
+                                {currentUser?.name?.charAt(0).toUpperCase()}
+                            </div>
                             <h1 className="font-bold text-gray-700">Teamchat</h1>
                         </div>
                         <div className="flex space-x-2 relative" ref={menuRef}>

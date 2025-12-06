@@ -204,47 +204,56 @@ async def get_chats(user_id: int = None):
 
 @app.post("/chats")
 async def create_chat(chat_data: dict, background_tasks: BackgroundTasks):
-    new_id = int(datetime.now().timestamp() * 1000)
-    
-    new_chat = {
-        "id": new_id,
-        "name": chat_data["name"],
-        "type": chat_data.get("type", "group"),
-        "participants": chat_data.get("participants", []),
-        "avatar": chat_data.get("avatar", f"https://ui-avatars.com/api/?name={chat_data['name']}&background=random"),
-        "members": len(chat_data.get("participants", [])),
-        "lastMessage": "Tap to start chatting",
-        "timestamp": datetime.now().isoformat(),
-        "isPrivate": chat_data.get("isPrivate", False),
-        "createdBy": chat_data.get("createdBy", None)
-    }
-    
-    # 1. Save to SQLite
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    import json
-    cursor.execute('''
-        INSERT INTO chats (id, name, type, participants, avatar, lastMessage, timestamp, isPrivate, createdBy, synced)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-    ''', (
-        new_id,
-        new_chat["name"],
-        new_chat["type"],
-        json.dumps(new_chat["participants"]),
-        new_chat["avatar"],
-        new_chat["lastMessage"],
-        new_chat["timestamp"],
-        1 if new_chat["isPrivate"] else 0,
-        json.dumps(new_chat["createdBy"]) if new_chat["createdBy"] else None
-    ))
-    conn.commit()
-    conn.close()
-    
-    # 2. Trigger Background Sync
-    background_tasks.add_task(sync_to_firebase)
-    
-    return new_chat
+    import traceback
+    try:
+        print(f"Received chat_data: {chat_data}")
+        new_id = int(datetime.now().timestamp() * 1000)
+        
+        new_chat = {
+            "id": new_id,
+            "name": chat_data["name"],
+            "type": chat_data.get("type", "group"),
+            "participants": chat_data.get("participants", []),
+            "avatar": chat_data.get("avatar", f"https://ui-avatars.com/api/?name={chat_data['name']}&background=random"),
+            "members": len(chat_data.get("participants", [])),
+            "lastMessage": "Tap to start chatting",
+            "timestamp": datetime.now().isoformat(),
+            "isPrivate": chat_data.get("isPrivate", False),
+            "createdBy": chat_data.get("createdBy", None)
+        }
+        
+        # 1. Save to SQLite
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        import json
+        cursor.execute('''
+            INSERT INTO chats (id, name, type, participants, avatar, lastMessage, timestamp, isPrivate, createdBy, synced)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        ''', (
+            new_id,
+            new_chat["name"],
+            new_chat["type"],
+            json.dumps(new_chat["participants"]),
+            new_chat["avatar"],
+            new_chat["lastMessage"],
+            new_chat["timestamp"],
+            1 if new_chat["isPrivate"] else 0,
+            json.dumps(new_chat["createdBy"]) if new_chat["createdBy"] else None
+        ))
+        conn.commit()
+        conn.close()
+        
+        # 2. Trigger Background Sync
+        background_tasks.add_task(sync_to_firebase)
+        
+        return new_chat
+    except Exception as e:
+        error_msg = f"Error creating chat: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        with open("backend_debug.txt", "a") as f:
+            f.write(f"[{datetime.now()}] {error_msg}\n")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/chats/public")
 async def get_public_chats():
@@ -592,6 +601,24 @@ async def get_messages(chat_id: int):
         
     return msgs
 
+@app.get("/chats/{chat_id}/messages")
+async def get_messages(chat_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM messages WHERE chat_id = ? ORDER BY id ASC", (chat_id,))
+    messages = []
+    for row in cursor.fetchall():
+        msg = dict(row)
+        # Parse replyTo JSON if it exists
+        if msg.get("replyTo"):
+            try:
+                msg["replyTo"] = json.loads(msg["replyTo"])
+            except:
+                msg["replyTo"] = None
+        messages.append(msg)
+    conn.close()
+    return messages
+
 @app.post("/chats/{chat_id}/messages")
 async def add_message(chat_id: int, message: Message, background_tasks: BackgroundTasks):
     # 1. Save to SQLite (Local First)
@@ -607,8 +634,8 @@ async def add_message(chat_id: int, message: Message, background_tasks: Backgrou
     msg_dict["isPinned"] = False
     
     cursor.execute('''
-        INSERT INTO messages (id, chat_id, text, sender, time, type, fileUrl, fileName, fileSize, isPinned, callRoomName, callStatus, isVoice, synced)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        INSERT INTO messages (id, chat_id, text, sender, time, type, fileUrl, fileName, fileSize, isPinned, callRoomName, callStatus, isVoice, replyTo, synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
     ''', (
         new_id,
         chat_id,
@@ -622,7 +649,8 @@ async def add_message(chat_id: int, message: Message, background_tasks: Backgrou
         0, # isPinned
         msg_dict.get("callRoomName"),
         msg_dict.get("callStatus"),
-        msg_dict.get("isVoice", False)
+        msg_dict.get("isVoice", False),
+        json.dumps(msg_dict.get("replyTo")) if msg_dict.get("replyTo") else None
     ))
     conn.commit()
     conn.close()
@@ -733,21 +761,65 @@ async def pin_message(chat_id: int, message_id: int):
     raise HTTPException(status_code=404, detail="Message not found")
 
 @app.put("/chats/{chat_id}/messages/{message_id}")
-async def update_message(chat_id: int, message_id: int, updates: dict):
-    chats_ref = db.collection("chats")
-    query = chats_ref.where("id", "==", chat_id).limit(1).stream()
+async def update_message(chat_id: int, message_id: int, updates: dict, background_tasks: BackgroundTasks):
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
-    for doc in query:
-        messages_ref = doc.reference.collection("messages")
-        msg_query = messages_ref.where("id", "==", message_id).limit(1).stream()
+    # 1. Update SQLite
+    fields = []
+    values = []
+    for k, v in updates.items():
+        if k in ['text', 'callStatus', 'isPinned', 'replyTo']: # Allowed fields
+            fields.append(f"{k} = ?")
+            if isinstance(v, (dict, list)):
+                values.append(json.dumps(v))
+            else:
+                values.append(v)
+                
+    if not fields:
+        conn.close()
+        return {"error": "No valid fields to update"}
         
-        for msg_doc in msg_query:
-            msg_doc.reference.update(updates)
-            updated_data = msg_doc.to_dict()
-            updated_data.update(updates)
-            return updated_data
+    values.append(message_id) # For WHERE clause
+    
+    cursor.execute(f"UPDATE messages SET {', '.join(fields)} WHERE id = ?", values)
+    
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Message not found in local DB")
+        
+    conn.commit()
+    
+    # 2. Fetch updated message
+    cursor.execute("SELECT * FROM messages WHERE id = ?", (message_id,))
+    row = cursor.fetchone()
+    updated_msg = dict(row)
+    
+    # Parse JSON fields if needed
+    if updated_msg.get("replyTo") and isinstance(updated_msg["replyTo"], str):
+        try:
+            updated_msg["replyTo"] = json.loads(updated_msg["replyTo"])
+        except:
+            pass
             
-    raise HTTPException(status_code=404, detail="Message not found")
+    conn.close()
+    
+    # 3. Broadcast
+    await manager.broadcast(updated_msg, chat_id)
+    
+    # 4. Background Sync (Firestore)
+    def sync_update():
+        chats_ref = db.collection("chats")
+        query = chats_ref.where("id", "==", chat_id).limit(1).stream()
+        for doc in query:
+            messages_ref = doc.reference.collection("messages")
+            msg_query = messages_ref.where("id", "==", message_id).limit(1).stream()
+            for msg_doc in msg_query:
+                msg_doc.reference.update(updates)
+                
+    background_tasks.add_task(sync_update)
+    
+    return updated_msg
 
 @app.delete("/chats/{chat_id}/messages/{message_id}")
 async def delete_message(chat_id: int, message_id: int):
@@ -767,7 +839,7 @@ async def delete_message(chat_id: int, message_id: int):
 
 
 @app.post("/chats/{chat_id}/participants")
-async def add_participant(chat_id: int, user_data: dict):
+async def add_participant(chat_id: int, user_data: dict, background_tasks: BackgroundTasks):
     email = user_data.get("email")
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
@@ -903,7 +975,54 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int, user_id: int):
     await manager.connect(websocket, chat_id)
     try:
         while True:
-            await websocket.receive_text()
-            # Keep connection alive
+            data = await websocket.receive_text()
+            try:
+                message_data = json.loads(data)
+                
+                # 1. Save to SQLite
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                
+                # Default values
+                msg_id = message_data.get("id", int(datetime.now().timestamp() * 1000))
+                text = message_data.get("text", "")
+                sender = message_data.get("sender", str(user_id)) # Fallback to user_id path param
+                time_str = message_data.get("time", datetime.now().strftime("%H:%M"))
+                msg_type = message_data.get("type", "text")
+                file_url = message_data.get("fileUrl", "")
+                file_name = message_data.get("filename", "")
+                file_size = message_data.get("size", "")
+                
+                cursor.execute('''
+                    INSERT INTO messages (id, chat_id, text, sender, time, type, fileUrl, fileName, fileSize, synced)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                ''', (
+                    msg_id,
+                    chat_id,
+                    text,
+                    sender,
+                    time_str,
+                    msg_type,
+                    file_url,
+                    file_name,
+                    file_size
+                ))
+                
+                # Update Chat's Last Message
+                last_msg_preview = text if msg_type == 'text' else f"Sent a {msg_type}"
+                cursor.execute('UPDATE chats SET lastMessage = ?, timestamp = ? WHERE id = ?', 
+                               (last_msg_preview, datetime.now().isoformat(), chat_id))
+                
+                conn.commit()
+                conn.close()
+                
+                # 2. Broadcast to Room
+                await manager.broadcast(json.dumps(message_data), chat_id)
+                
+            except json.JSONDecodeError:
+                print(f"Invalid JSON received: {data}")
+            except Exception as e:
+                print(f"Error processing message: {e}")
+                
     except WebSocketDisconnect:
         manager.disconnect(websocket, chat_id)

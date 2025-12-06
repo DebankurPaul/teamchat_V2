@@ -11,6 +11,7 @@ import ConfirmationModal from './ConfirmationModal';
 import { Edit2 } from 'lucide-react';
 
 const Layout = () => {
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
   const [user, setUser] = useState(null); // Auth state
   const [isRegistering, setIsRegistering] = useState(false);
   const [selectedChat, setSelectedChat] = useState(null);
@@ -32,8 +33,7 @@ const Layout = () => {
   // WebSocket Connection
   useEffect(() => {
     if (user) {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const wsUrl = apiUrl.replace('http', 'ws');
+      const wsUrl = API_URL.replace('http', 'ws');
       const ws = new WebSocket(`${wsUrl}/ws/${user.id}`);
 
       ws.onopen = () => {
@@ -62,8 +62,7 @@ const Layout = () => {
 
   // Fetch chats on mount
   useEffect(() => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-    fetch(`${apiUrl}/chats`)
+    fetch(`${API_URL}/chats`)
       .then(res => res.json())
       .then(data => {
         console.log("Fetched chats:", data);
@@ -77,8 +76,7 @@ const Layout = () => {
 
   // Fetch public groups
   useEffect(() => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-    fetch(`${apiUrl}/chats/public`)
+    fetch(`${API_URL}/chats/public`)
       .then(res => res.json())
       .then(data => setPublicGroups(data))
       .catch(err => console.error("Failed to fetch public groups", err));
@@ -108,12 +106,44 @@ const Layout = () => {
       message: 'Are you sure you want to delete this chat? This action cannot be undone.',
       isDanger: true,
       onConfirm: () => {
-        fetch(`${import.meta.env.VITE_API_URL}/chats/${chatId}`, { method: 'DELETE' })
+        fetch(`${API_URL}/chats/${chatId}`, { method: 'DELETE' })
+          .then(res => {
+            if (!res.ok) throw new Error("Failed to delete chat");
+            return res.json();
+          })
           .then(() => {
             setChats(chats.filter(c => c.id !== chatId));
             setSelectedChat(null);
           })
-          .catch(err => console.error("Failed to delete chat", err));
+          .catch(err => {
+            console.error("Failed to delete chat", err);
+            alert("Failed to delete chat. Please try again.");
+          });
+      }
+    });
+  };
+
+  const handleBulkDelete = (chatIds) => {
+    setConfirmation({
+      isOpen: true,
+      title: 'Delete Selected Chats',
+      message: `Are you sure you want to delete ${chatIds.length} chats? This action cannot be undone.`,
+      isDanger: true,
+      onConfirm: () => {
+        Promise.all(chatIds.map(id =>
+          fetch(`${API_URL}/chats/${id}`, { method: 'DELETE' })
+            .then(res => { if (!res.ok) throw new Error(`Failed to delete ${id}`); })
+        ))
+          .then(() => {
+            setChats(chats.filter(c => !chatIds.includes(c.id)));
+            if (selectedChat && chatIds.includes(selectedChat.id)) {
+              setSelectedChat(null);
+            }
+          })
+          .catch(err => {
+            console.error("Failed to delete chats", err);
+            alert("Failed to delete some chats.");
+          });
       }
     });
   };
@@ -126,7 +156,7 @@ const Layout = () => {
       createdBy: user ? { name: user.name, email: user.email } : null
     };
 
-    fetch('${import.meta.env.VITE_API_URL}/chats', {
+    fetch(`${API_URL}/chats`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(groupWithCreator)
@@ -146,7 +176,7 @@ const Layout = () => {
     if (!user) return;
 
     // Use the add_participant endpoint to add self
-    fetch(`${import.meta.env.VITE_API_URL}/chats/${group.id}/participants`, {
+    fetch(`${API_URL}/chats/${group.id}/participants`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: user.email })
@@ -157,7 +187,7 @@ const Layout = () => {
       })
       .then(() => {
         // Refresh chats to show the new group
-        return fetch('${import.meta.env.VITE_API_URL}/chats');
+        return fetch(`${API_URL}/chats`);
       })
       .then(res => res.json())
       .then(data => {
@@ -183,7 +213,7 @@ const Layout = () => {
   const handleUpdateProfile = (newName) => {
     if (!newName.trim()) return;
 
-    fetch(`${import.meta.env.VITE_API_URL}/users/${user.id}`, {
+    fetch(`${API_URL}/users/${user.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newName })
@@ -243,6 +273,8 @@ const Layout = () => {
           activeTab={activeTab}
           onTabChange={setActiveTab}
           onLogout={() => setUser(null)}
+          currentUser={user}
+          onBulkDelete={handleBulkDelete}
         />
         <div className="md:hidden">
           <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />

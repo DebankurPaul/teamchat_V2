@@ -1,0 +1,31 @@
+Found 5 messages with replyTo.
+--------------------
+Msg ID: 1764996567915
+Text: u
+ReplyTo Keys: ['id', 'chat_id', 'text', 'sender', 'time', 'type', 'fileUrl', 'isPinned', 'synced', 'callRoomName', 'callStatus', 'isVoice', 'replyTo', 'filename', 'size']
+ReplyTo Sender: 1 (Type: <class 'str'>)
+ReplyTo Text: hi
+--------------------
+Msg ID: 1764996547117
+Text: hi
+ReplyTo Keys: ['id', 'chat_id', 'text', 'sender', 'time', 'type', 'fileUrl', 'isPinned', 'synced', 'callRoomName', 'callStatus', 'isVoice', 'replyTo', 'filename', 'size']
+ReplyTo Sender: 1 (Type: <class 'str'>)
+ReplyTo Text: ya
+--------------------
+Msg ID: 1764996492206
+Text: ya
+ReplyTo Keys: ['id', 'chat_id', 'text', 'sender', 'time', 'type', 'fileUrl', 'isPinned', 'synced', 'callRoomName', 'callStatus', 'isVoice', 'replyTo', 'filename', 'size']
+ReplyTo Sender: 1 (Type: <class 'str'>)
+ReplyTo Text: hi
+--------------------
+Msg ID: 1764995407370
+Text: hi
+ReplyTo Keys: ['id', 'chat_id', 'text', 'sender', 'time', 'type', 'fileUrl', 'isPinned', 'synced', 'callRoomName', 'callStatus', 'isVoice', 'replyTo', 'filename', 'size']
+ReplyTo Sender: 1 (Type: <class 'str'>)
+ReplyTo Text: hi
+--------------------
+Msg ID: 1764995120577
+Text: hi
+ReplyTo Keys: ['id', 'chat_id', 'text', 'sender', 'time', 'type', 'fileUrl', 'isPinned', 'synced', 'callRoomName', 'callStatus', 'isVoice', 'replyTo', 'filename', 'size']
+ReplyTo Sender: 1 (Type: <class 'str'>)
+ReplyTo Text: hi

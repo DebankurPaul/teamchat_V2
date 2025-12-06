@@ -3,7 +3,7 @@ from typing import Optional
 
 class Message(BaseModel):
     text: Optional[str] = None
-    sender: str
+    sender: str | int
     type: str = "text"
     filename: Optional[str] = None
     fileUrl: Optional[str] = None

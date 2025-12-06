@@ -56,40 +56,64 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
     const handleSendFile = async (file, caption) => {
         setFileToPreview(null); // Close modal immediately
 
+        // 1. Optimistic UI: Create temporary message
+        const tempId = Date.now();
+        const tempMessage = {
+            id: tempId,
+            type: 'file',
+            filename: file.name,
+            fileUrl: URL.createObjectURL(file), // Local preview
+            size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+            sender: currentUser?.id || 'me',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            status: 'sending', // Distinct status
+            text: caption || null,
+            isOptimistic: true // Flag to identify temp message
+        };
+
+        // Add to UI immediately
+        setMessages(prev => [...prev, tempMessage]);
+
         const formData = new FormData();
         formData.append('file', file);
 
         try {
-            // 1. Upload File
+            // 2. Upload File
             const response = await fetch(`${API_URL}/upload`, {
                 method: 'POST',
                 body: formData
             });
             const data = await response.json();
 
-            const newMessage = {
-                type: 'file',
-                filename: file.name,
-                fileUrl: data.url,
-                size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-                sender: currentUser?.id || 'me',
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            // 3. Prepare Final Message
+            const finalMessage = {
+                ...tempMessage,
+                fileUrl: data.url, // Update with server URL
                 status: 'sent',
-                text: caption || null // Add caption if provided
+                isOptimistic: false
             };
+            // Note: We don't send 'id' to backend, let it auto-generate, 
+            // OR we use the tempId if we want to ensure consistency. 
+            // Backend endpoint usually ignores ID in POST or generates new one.
+            // Let's omit ID for backend creation.
+            const { id, isOptimistic, ...messageToSend } = finalMessage;
 
-            // 2. Save Message to Backend
+            // 4. Save Message to Backend
             const msgResponse = await fetch(`${API_URL}/chats/${chat.id}/messages`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newMessage)
+                body: JSON.stringify(messageToSend)
             });
 
             const savedMsg = await msgResponse.json();
-            setMessages([...messages, savedMsg]);
+
+            // 5. Replace Temp Message with Saved Message
+            setMessages(prev => prev.map(msg => msg.id === tempId ? savedMsg : msg));
 
         } catch (error) {
             console.error("File upload failed", error);
+            // Mark as failed
+            setMessages(prev => prev.map(msg => msg.id === tempId ? { ...msg, status: 'failed' } : msg));
             alert("Failed to upload file");
         }
     };

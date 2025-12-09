@@ -8,3 +8,7 @@ pypdf
 python-docx
 openpyxl
 websockets
+python-pptx
+beautifulsoup4
+lxml
+requests

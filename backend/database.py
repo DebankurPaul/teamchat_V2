@@ -31,7 +31,8 @@ def init_db():
             avatar TEXT,
             status TEXT,
             lastSeen TEXT,
-            synced BOOLEAN DEFAULT FALSE
+            synced BOOLEAN DEFAULT FALSE,
+            settings TEXT DEFAULT '{}' 
         )
     ''')
     
@@ -84,6 +85,16 @@ def init_db():
             timestamp TEXT,
             is_analyzed BOOLEAN DEFAULT FALSE,
             synced BOOLEAN DEFAULT FALSE
+        )
+    ''')
+
+    # Blocked Users Table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS blocked_users (
+            blocker_id BIGINT,
+            blocked_id BIGINT,
+            timestamp TEXT,
+            PRIMARY KEY (blocker_id, blocked_id)
         )
     ''')
     

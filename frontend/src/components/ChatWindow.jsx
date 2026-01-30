@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Phone, Video, MoreVertical, Paperclip, Mic, Send, Lightbulb, Trash2, Reply, X, Forward, Users, Pin, ChevronLeft, ChevronRight, PhoneOff, Image } from 'lucide-react';
+import { ArrowLeft, Phone, Video, MoreVertical, Paperclip, Mic, Send, Lightbulb, Trash2, Reply, X, Forward, Users, Pin, ChevronLeft, ChevronRight, PhoneOff, Image, Check, CheckCheck, Ban, ShieldAlert } from 'lucide-react';
 import VideoCall from './VideoCall';
 import FilePreviewModal from './FilePreviewModal';
 import ConfirmationModal from './ConfirmationModal';
@@ -44,6 +44,67 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
     const [toast, setToast] = useState(null);
     const [fileToPreview, setFileToPreview] = useState(null);
     const [deleteOptions, setDeleteOptions] = useState(null);
+    const [blockedUsers, setBlockedUsers] = useState([]);
+
+    useEffect(() => {
+        if (!currentUser) return;
+        fetch(`${API_URL}/users/${currentUser.id}/blocked`)
+            .then(res => res.json())
+            .then(data => setBlockedUsers(data))
+            .catch(err => console.error("Failed to fetch blocked users", err));
+    }, [currentUser]);
+
+    const getChatPartnerId = () => {
+        if (chat.type === 'group') return null; // Logic for group blocking is different
+        // In 1-to-1, the partner ID is NOT the chat ID (which might be random or same). 
+        // Need to find the other participant. 
+        // Logic: active chat usually has participants.
+        const partner = participants.find(p => String(p.id) !== String(currentUser?.id));
+        return partner ? partner.id : null;
+    };
+
+    const isChatPartnerBlocked = () => {
+        const partnerId = getChatPartnerId();
+        return partnerId && blockedUsers.includes(partnerId);
+    };
+
+    const handleToggleBlock = async () => {
+        const partnerId = getChatPartnerId();
+        if (!partnerId) return;
+
+        const isBlocked = isChatPartnerBlocked();
+        const endpoint = isBlocked ? '/users/unblock' : '/users/block';
+
+        try {
+            await fetch(`${API_URL}${endpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    blocker_id: currentUser.id,
+                    blocked_id: partnerId
+                })
+            });
+
+            if (isBlocked) {
+                setBlockedUsers(prev => prev.filter(id => id !== partnerId));
+                showNotification("User unblocked");
+            } else {
+                setBlockedUsers(prev => [...prev, partnerId]);
+                showNotification("User blocked");
+            }
+            setShowMenu(false);
+        } catch (error) {
+            console.error("Block toggle failed", error);
+            showNotification("Failed to update block status");
+        }
+    };
+
+    // Audio Recording State
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordingDuration, setRecordingDuration] = useState(0);
+    const mediaRecorderRef = useRef(null);
+    const audioChunksRef = useRef([]);
+    const timerRef = useRef(null);
 
     // Derived state for delete permissions
     const msgToDelete = deleteOptions ? messages.find(m => m.id === deleteOptions) : null;
@@ -185,6 +246,11 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                 return;
             }
 
+            if (msg.type === 'error') {
+                showNotification(msg.text);
+                return;
+            }
+
             // Handle Normal Messages
             // Handle Normal Messages
             const incomingMsg = msg;
@@ -199,6 +265,17 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                 // Add new message
                 return [...prev, incomingMsg];
             });
+
+            // Handle Read Receipts
+            if (msg.type === 'messages_read' && msg.chat_id === chat.id) {
+                setMessages(prev => prev.map(m => {
+                    // If I sent the message, mark it as read
+                    if (m.sender === 'me' || String(m.sender) === String(currentUser?.id)) {
+                        return { ...m, status: 'read' };
+                    }
+                    return m;
+                }));
+            }
 
             // Auto-close call if it ended
             if (incomingMsg.callStatus === 'ended') {
@@ -224,6 +301,18 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
             clearInterval(interval);
         };
     }, [chat.id, currentUser]); // Re-run when chat changes
+
+    useEffect(() => {
+        // always mark as read if I'm viewing the chat and there are unread messages from others
+        const hasUnread = messages.some(m => m.sender !== 'me' && String(m.sender) !== String(currentUser?.id) && m.status !== 'read');
+        if (hasUnread) {
+            fetch(`${API_URL}/chats/${chat.id}/messages/read`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: currentUser?.id })
+            }).catch(err => console.error("Failed to mark read", err));
+        }
+    }, [messages, chat.id, currentUser]);
 
     useEffect(() => {
         // Always fetch participants to resolve names correctly (for DM and Group)
@@ -341,6 +430,100 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
     const handleLeaveCall = () => {
         setCallRoomName(null);
         setIsVoiceCall(false);
+    };
+
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorderRef.current = new MediaRecorder(stream);
+            audioChunksRef.current = [];
+
+            mediaRecorderRef.current.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunksRef.current.push(event.data);
+                }
+            };
+
+            mediaRecorderRef.current.onstop = () => {
+                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                handleSendAudio(audioBlob);
+                stream.getTracks().forEach(track => track.stop()); // Stop mic
+            };
+
+            mediaRecorderRef.current.start();
+            setIsRecording(true);
+            setRecordingDuration(0);
+            timerRef.current = setInterval(() => {
+                setRecordingDuration(prev => prev + 1);
+            }, 1000);
+        } catch (error) {
+            console.error("Error accessing microphone:", error);
+            showNotification("Could not access microphone");
+        }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+            clearInterval(timerRef.current);
+        }
+    };
+
+    const handleSendAudio = async (audioBlob) => {
+        // Optimistic UI
+        const tempId = Date.now();
+        const tempMessage = {
+            id: tempId,
+            type: 'audio',
+            sender: currentUser?.id || 'me',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            status: 'sending',
+            fileUrl: URL.createObjectURL(audioBlob),
+            isOptimistic: true
+        };
+        setMessages(prev => [...prev, tempMessage]);
+
+        const formData = new FormData();
+        formData.append('file', audioBlob, 'voice_message.webm');
+
+        try {
+            // Upload
+            const response = await fetch(`${API_URL}/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+
+            // Send Message
+            const messageToSend = {
+                type: 'audio',
+                fileUrl: data.url,
+                filename: 'voice_message.webm',
+                sender: currentUser?.id || 'me',
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                status: 'sent'
+            };
+
+            const msgResponse = await fetch(`${API_URL}/chats/${chat.id}/messages`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(messageToSend)
+            });
+            const savedMsg = await msgResponse.json();
+
+            setMessages(prev => prev.map(msg => msg.id === tempId ? savedMsg : msg));
+        } catch (error) {
+            console.error("Failed to send audio", error);
+            showNotification("Failed to send voice note");
+            setMessages(prev => prev.map(msg => msg.id === tempId ? { ...msg, status: 'failed' } : msg));
+        }
+    };
+
+    const formatDuration = (sec) => {
+        const min = Math.floor(sec / 60);
+        const s = sec % 60;
+        return `${min}:${s < 10 ? '0' : ''}${s}`;
     };
 
     const handleEndMeeting = (msgId) => {
@@ -640,6 +823,13 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                             <div className="absolute right-0 top-10 bg-white shadow-lg rounded-lg py-2 w-48 z-20 border border-gray-100">
                                 <button onClick={() => setShowParticipantsModal(true)} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-gray-700 text-sm">View Participants</button>
                                 <button onClick={handleClearChat} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-gray-700 text-sm">Clear Chat</button>
+                                <button onClick={() => setShowParticipantsModal(true)} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-gray-700 text-sm">View Participants</button>
+                                <button onClick={handleClearChat} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-gray-700 text-sm">Clear Chat</button>
+                                {chat.type !== 'group' && (
+                                    <button onClick={handleToggleBlock} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-red-600 text-sm">
+                                        {isChatPartnerBlocked() ? "Unblock User" : "Block User"}
+                                    </button>
+                                )}
                                 <button onClick={handleDeleteChannel} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-red-600 text-sm">Delete Channel</button>
                             </div>
                         )}
@@ -819,6 +1009,17 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                                             <Lightbulb size={16} />
                                         </button>
                                     </div>
+                                ) : msg.type === 'audio' ? (
+                                    <div className="flex flex-col space-y-2 p-2 w-[250px]">
+                                        <div className="flex items-center space-x-2">
+                                            <div className="bg-teal-500 rounded-full p-2 text-white">
+                                                <Mic size={20} />
+                                            </div>
+                                            <div className="flex-1">
+                                                <audio controls src={msg.fileUrl?.startsWith('http') ? msg.fileUrl : (msg.fileUrl ? `${API_URL}${msg.fileUrl}` : '')} className="w-full h-8" />
+                                            </div>
+                                        </div>
+                                    </div>
                                 ) : msg.type === 'call' ? (
                                     <div className="flex flex-col space-y-2 p-2 w-full">
                                         <div className={`flex items-center justify-center space-x-2 font-medium ${msg.callStatus === 'ended' ? 'text-gray-500' : 'text-gray-800'}`}>
@@ -864,7 +1065,14 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                                 {/* Metadata & Actions */}
                                 <div className="flex justify-between items-center mt-1 space-x-2">
                                     <span className="text-[10px] text-gray-500">{msg.time}</span>
-                                    {isMe && <span className="text-teal-500 text-[10px]">✓✓</span>}
+                                    <span className="text-[10px] text-gray-500">{msg.time}</span>
+                                    {isMe && (
+                                        <span className="" title={msg.status}>
+                                            {msg.status === 'read' ? <CheckCheck size={14} className="text-teal-500" /> :
+                                                msg.status === 'delivered' ? <CheckCheck size={14} className="text-gray-400" /> :
+                                                    <Check size={14} className="text-gray-400" />}
+                                        </span>
+                                    )}
                                 </div>
 
                                 {/* Message Actions (Reply/Delete/Forward/Pin) - Visible on Hover */}
@@ -927,39 +1135,64 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
             />
 
             {/* Input Area */}
-            <div className="p-3 bg-gray-100 flex items-center space-x-2 z-20 relative border-t border-gray-200">
-                <input
-                    type="file"
-                    id="file-upload"
-                    className="hidden"
-                    onChange={handleFileSelect}
-                />
-                <button
-                    className="text-gray-500 hover:text-gray-700"
-                    onClick={() => document.getElementById('file-upload').click()}
-                >
-                    <Paperclip size={24} />
-                </button>
-                <div className="flex-1 bg-white rounded-full flex items-center px-4 py-2 border border-gray-200">
-                    <input
-                        type="text"
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                        placeholder="Type a message"
-                        className="flex-1 bg-transparent focus:outline-none text-sm"
-                    />
+            {isChatPartnerBlocked() ? (
+                <div className="p-4 bg-gray-100 border-t border-gray-200 text-center flex flex-col items-center justify-center h-20">
+                    <p className="text-sm text-gray-500 mb-1 flex items-center">
+                        <Ban size={16} className="mr-2" />
+                        You blocked this contact
+                    </p>
+                    <button onClick={handleToggleBlock} className="text-teal-600 font-medium text-sm hover:underline">
+                        Tap to unblock
+                    </button>
                 </div>
-                {message ? (
-                    <button onClick={handleSendMessage} className="bg-teal-500 text-white p-2 rounded-full hover:bg-teal-600 transition-colors">
-                        <Send size={20} />
+            ) : (
+                <div className="p-3 bg-gray-100 flex items-center space-x-2 z-20 relative border-t border-gray-200">
+                    <input
+                        type="file"
+                        id="file-upload"
+                        className="hidden"
+                        onChange={handleFileSelect}
+                    />
+                    <button
+                        className="text-gray-500 hover:text-gray-700"
+                        onClick={() => document.getElementById('file-upload').click()}
+                    >
+                        <Paperclip size={24} />
                     </button>
-                ) : (
-                    <button className="text-gray-500 hover:text-gray-700">
-                        <Mic size={24} />
-                    </button>
-                )}
-            </div>
+                    <div className="flex-1 bg-white rounded-full flex items-center px-4 py-2 border border-gray-200">
+                        <input
+                            type="text"
+                            value={message}
+                            onChange={(e) => setMessage(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                            placeholder="Type a message"
+                            className="flex-1 bg-transparent focus:outline-none text-sm"
+                        />
+                    </div>
+                    {message ? (
+                        <button onClick={handleSendMessage} className="bg-teal-500 text-white p-2 rounded-full hover:bg-teal-600 transition-colors">
+                            <Send size={20} />
+                        </button>
+                    ) : (
+                        <button
+                            className={`transition-colors ${isRecording ? 'text-red-500 animate-pulse' : 'text-gray-500 hover:text-gray-700'}`}
+                            onMouseDown={startRecording}
+                            onMouseUp={stopRecording}
+                            onMouseLeave={stopRecording} // Stop if dragged out
+                            onTouchStart={startRecording}
+                            onTouchEnd={stopRecording}
+                            title="Hold to record"
+                        >
+                            <Mic size={24} />
+                        </button>
+                    )}
+                    {isRecording && (
+                        <div className="absolute left-14 bg-white px-3 py-1 rounded-full shadow-md text-red-500 font-mono text-sm border border-red-100 animate-fade-in-up">
+                            🔴 {formatDuration(recordingDuration)}
+                        </div>
+                    )}
+                </div>
+            )}
 
 
 

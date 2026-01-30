@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, MoreVertical, MessageSquare, Lightbulb, Calendar, User, Plus, Users, Link as LinkIcon, Lock, Globe, LogOut, Star, CheckSquare, UserPlus, X, Trash2 } from 'lucide-react';
+import { Search, MoreVertical, MessageSquare, Lightbulb, Calendar, User, Plus, Users, Link as LinkIcon, Lock, Globe, LogOut, Star, CheckSquare, UserPlus, X, Trash2, CircleDashed, Settings } from 'lucide-react';
+import SettingsModal from './SettingsModal';
 
-const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup, activeTab, onTabChange, onLogout, currentUser, onBulkDelete, showNotification }) => {
+const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup, activeTab, onTabChange, onLogout, currentUser, onBulkDelete, showNotification, onUpdateProfile }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [showCreateGroup, setShowCreateGroup] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
@@ -12,6 +13,9 @@ const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup
     // Selection Mode State
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedChatIds, setSelectedChatIds] = useState([]);
+
+    // Settings State
+    const [showSettings, setShowSettings] = useState(false);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -291,6 +295,13 @@ const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup
                                     </button>
                                     <div className="h-px bg-gray-700 my-1"></div>
                                     <button
+                                        onClick={() => { setShowSettings(true); setShowMenu(false); }}
+                                        className="w-full text-left px-4 py-3 hover:bg-[#111b21] flex items-center space-x-3 transition-colors"
+                                    >
+                                        <Settings size={18} />
+                                        <span>Settings</span>
+                                    </button>
+                                    <button
                                         onClick={() => { if (onLogout) onLogout(); setShowMenu(false); }}
                                         className="w-full text-left px-4 py-3 hover:bg-[#111b21] flex items-center space-x-3 transition-colors text-red-400"
                                     >
@@ -313,6 +324,12 @@ const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup
                     <MessageSquare size={20} />
                 </button>
                 <button
+                    onClick={() => onTabChange('status')}
+                    className={`flex-1 py-3 flex justify-center items-center ${activeTab === 'status' ? 'border-b-2 border-teal-500 text-teal-600' : 'text-gray-500 hover:bg-gray-50'}`}
+                >
+                    <CircleDashed size={20} />
+                </button>
+                <button
                     onClick={() => onTabChange('ideas')}
                     className={`flex-1 py-3 flex justify-center items-center ${activeTab === 'ideas' ? 'border-b-2 border-teal-500 text-teal-600' : 'text-gray-500 hover:bg-gray-50'}`}
                 >
@@ -333,6 +350,19 @@ const Sidebar = ({ chats, publicGroups, onSelectChat, onCreateGroup, onJoinGroup
             </div>
 
             {renderContent()}
+
+            <SettingsModal
+                isOpen={showSettings}
+                onClose={() => setShowSettings(false)}
+                currentUser={currentUser}
+                onUpdateProfile={(updatedUser) => {
+                    // We need to pass this up to Layout/App
+                    // For now, let's just log or assume parent might pass a handler if we add it to props
+                    console.log("Profile updated:", updatedUser);
+                    // Refresh page or trigger callback if available
+                    if (window.location.reload) window.location.reload();
+                }}
+            />
         </div>
     );
 };

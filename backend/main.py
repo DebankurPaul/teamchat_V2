@@ -126,6 +126,18 @@ def get_user_by_email(email: str):
     conn.close()
     if row:
         return dict(row)
+    if row:
+        return dict(row)
+    return None
+
+def get_user_by_phone(phone: str):
+    conn = get_db_connection()
+    cursor = get_db_cursor(conn)
+    cursor.execute("SELECT * FROM users WHERE phone = %s", (phone,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return dict(row)
     return None
 
 def create_user_doc(user_data):
@@ -293,7 +305,18 @@ async def join_chat(request: dict):
 @app.post("/login")
 async def login(user_data: dict, background_tasks: BackgroundTasks):
     email = user_data.get("email")
-    existing_user = get_user_by_email(email)
+    phone = user_data.get("phone")
+    id_token = user_data.get("idToken")
+    
+    # Validation
+    if not email and not phone:
+        raise HTTPException(status_code=400, detail="Email or Phone required")
+
+    existing_user = None
+    if phone:
+        existing_user = get_user_by_phone(phone)
+    elif email:
+        existing_user = get_user_by_email(email)
     
     if existing_user:
         return existing_user
@@ -305,6 +328,7 @@ async def login(user_data: dict, background_tasks: BackgroundTasks):
         "id": new_id,
         "name": user_data.get("name", "User"),
         "email": email,
+        "phone": phone,
         "avatar": f"https://ui-avatars.com/api/?name={user_data.get('name', 'User')}&background=random",
         "status": "offline",
         "lastSeen": None
@@ -314,12 +338,13 @@ async def login(user_data: dict, background_tasks: BackgroundTasks):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO users (id, name, email, avatar, status, lastSeen, synced)
-        VALUES (%s, %s, %s, %s, %s, %s, FALSE)
+        INSERT INTO users (id, name, email, phone, avatar, status, lastSeen, synced)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE)
     ''', (
         new_user["id"],
         new_user["name"],
         new_user["email"],
+        new_user["phone"],
         new_user["avatar"],
         new_user["status"],
         new_user["lastSeen"]
@@ -355,15 +380,23 @@ async def get_ideas():
     conn = get_db_connection()
     cursor = get_db_cursor(conn)
     cursor.execute("SELECT * FROM ideas ORDER BY timestamp DESC")
-    rows = cursor.fetchall()
+    ideas = cursor.fetchall()
     conn.close()
     
-    ideas = []
-    for row in rows:
-        idea = dict(row)
-        idea["is_analyzed"] = bool(idea["is_analyzed"])
-        ideas.append(idea)
-    return ideas
+    # Map Schema to Component Expectation
+    mapped_ideas = []
+    for idea in ideas:
+        mapped_ideas.append({
+            "id": idea.get("id"),
+            "title": idea.get("text", "Untitled Idea"), # Using text as title
+            "category": idea.get("category", "General"),
+            "status": "New", # Mock status
+            "priority": "Medium", # Mock priority
+            "suggestion": "AI suggestion unavailable in simple schema",
+            "color": "bg-white",
+            "timestamp": idea.get("timestamp")
+        })
+    return mapped_ideas
 
 @app.post("/ideas")
 async def add_idea(idea: dict, background_tasks: BackgroundTasks):
@@ -552,11 +585,32 @@ async def get_messages(chat_id: int, user_id: int = None):
     return messages
 
 @app.post("/chats/{chat_id}/messages")
-async def add_message(chat_id: int, message: Message, background_tasks: BackgroundTasks):
+async def send_message(chat_id: int, message: Message, background_tasks: BackgroundTasks):
     # 1. Save to Postgres
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    # Check Blocking Logic
+    sender_id = message.sender 
+    # If sender is "me", we need valid ID. But this endpoint expects valid ID or string.
+    
+    # 1. Fetch participants of this chat to check if any of them blocked the sender
+    cursor.execute("SELECT type, participants FROM chats WHERE id = %s", (chat_id,))
+    chat_row = cursor.fetchone()
+    
+    if chat_row:
+        chat_type = chat_row[0]
+        participants = json.loads(chat_row[1])
+        if chat_type == 'private':
+            # Find the other person
+            other_user_id = next((p['id'] for p in participants if str(p['id']) != str(sender_id)), None)
+            if other_user_id:
+                # Check if other_user blocked sender
+                cursor.execute("SELECT 1 FROM blocked_users WHERE blocker_id = %s AND blocked_id = %s", (other_user_id, sender_id))
+                if cursor.fetchone():
+                    conn.close()
+                    raise HTTPException(status_code=403, detail="You are blocked by this user.")
+
     # Generate ID using timestamp
     # Postgres supports BIGINT, manual ID is ok.
     new_id = int(datetime.now().timestamp() * 1000)
@@ -978,19 +1032,37 @@ async def analyze_message_endpoint(analysis_request: IdeaAnalysis):
     is_idea, confidence = analyze_text(analysis_request.text)
     
     if is_idea:
-        # Save to Firestore ideas
-        new_idea = {
-            "title": f"Idea from {analysis_request.sender}",
-            "content": analysis_request.text,
-            "tags": ["AI Detected"],
-            "timestamp": datetime.now().isoformat()
-        }
-        # Add ID
-        ideas_ref = db.collection("ideas")
-        count = len(list(ideas_ref.stream()))
-        new_idea["id"] = count + 1
+        # Save to Postgres ideas
+        new_id = int(datetime.now().timestamp() * 1000)
+        timestamp = datetime.now().isoformat()
         
-        db.collection("ideas").add(new_idea)
+        new_idea = {
+            "id": new_id,
+            "text": analysis_request.text, # Maps to content/text
+            "category": analysis_request.category or "General",
+            "votes": 0,
+            "timestamp": timestamp,
+            "is_analyzed": True
+        }
+        
+        # We need to map 'text' to DB 'text', 'category' to 'category'
+        # Note: The DB schema for 'ideas' is: id, text, category, votes, timestamp, is_analyzed, synced
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO ideas (id, text, category, votes, timestamp, is_analyzed, synced)
+            VALUES (%s, %s, %s, %s, %s, %s, FALSE)
+        ''', (
+            new_id,
+            new_idea["text"],
+            new_idea["category"],
+            new_idea["votes"],
+            new_idea["timestamp"],
+            new_idea["is_analyzed"]
+        ))
+        conn.commit()
+        conn.close()
         
     return {"is_idea": is_idea, "confidence": confidence}
 
@@ -1015,22 +1087,23 @@ async def analyze_file_endpoint(file_input: FileInput):
         analysis.is_idea = True
         
         if analysis.is_idea:
-             new_idea = {
-                "title": f"File Idea: {file_input.filename}",
-                "content": extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text,
-                "full_content": extracted_text,
-                "tags": ["File", "AI Detected", analysis.category or "General"],
-                "timestamp": datetime.now().isoformat(),
-                "priority": analysis.priority,
-                "viability_score": analysis.viability_score,
-                "deadline": analysis.deadline,
-                "action_suggestion": analysis.action_suggestion
-            }
-             ideas_ref = db.collection("ideas")
-             count = len(list(ideas_ref.stream()))
-             new_idea["id"] = count + 1
+             new_id = int(datetime.now().timestamp() * 1000)
+             conn = get_db_connection()
+             cursor = conn.cursor()
              
-             db.collection("ideas").add(new_idea)
+             cursor.execute('''
+                INSERT INTO ideas (id, text, category, votes, timestamp, is_analyzed, synced)
+                VALUES (%s, %s, %s, %s, %s, %s, FALSE)
+             ''', (
+                new_id,
+                extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text, # text column
+                analysis.category or "File",
+                0, # votes
+                datetime.now().isoformat(),
+                True # is_analyzed
+             ))
+             conn.commit()
+             conn.close()
              
         return analysis
     except Exception as e:
@@ -1039,8 +1112,315 @@ async def analyze_file_endpoint(file_input: FileInput):
         return {"is_idea": False, "error": str(e)}
 
 
-@app.websocket("/ws/{chat_id}/{user_id}")
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    import uuid
+    # Create unique filename to avoid collisions
+    _, ext = os.path.splitext(file.filename)
+    unique_name = f"{uuid.uuid4()}{ext}"
+    file_path = f"uploads/{unique_name}"
+    
+    with open(file_path, "wb+") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    return {"url": f"/uploads/{unique_name}", "filename": unique_name}
+
+
+@app.post("/chats/{chat_id}/messages/read")
+async def mark_messages_read(chat_id: int, request: dict):
+    user_id = request.get("user_id")
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Update all messages in this chat sent by OTHERS to 'read'
+    # For MVP (1-1): Just set status='read' where sender != user_id
+    cursor.execute('''
+        UPDATE messages 
+        SET status = 'read', synced = FALSE 
+        WHERE chat_id = %s AND sender != %s AND status != 'read'
+    ''', (chat_id, str(user_id)))
+    
+    row_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    if row_count > 0:
+        # Broadcast read receipt
+        await manager.broadcast({
+            "type": "messages_read",
+            "chat_id": chat_id,
+            "read_by": user_id
+        }, chat_id)
+        
+    return {"status": "success", "updated": row_count}
+
+
+
+@app.post("/keys")
+async def upload_keys(request: dict):
+    user_id = request.get("user_id")
+    public_key = request.get("public_key")
+    pre_key_bundle = request.get("pre_key_bundle")
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Upsert keys
+    cursor.execute('''
+        INSERT INTO user_keys (user_id, public_key, pre_key_bundle, timestamp, synced)
+        VALUES (%s, %s, %s, %s, FALSE)
+        ON CONFLICT (user_id) DO UPDATE 
+        SET public_key = EXCLUDED.public_key, 
+            pre_key_bundle = EXCLUDED.pre_key_bundle,
+            timestamp = EXCLUDED.timestamp,
+            synced = FALSE
+    ''', (user_id, public_key, json.dumps(pre_key_bundle) if pre_key_bundle else None, datetime.now().isoformat()))
+    
+    conn.commit()
+    conn.close()
+    
+    return {"status": "keys_uploaded"}
+
+@app.get("/keys/{user_id}")
+async def get_keys(user_id: int):
+    conn = get_db_connection()
+    cursor = get_db_cursor(conn)
+    cursor.execute("SELECT * FROM user_keys WHERE user_id = %s", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return dict(row)
+    if row:
+        return dict(row)
+    return {"error": "Keys not found", "user_id": user_id}
+
+@app.post("/users/block")
+async def block_user(request: dict):
+    blocker_id = request.get("blocker_id")
+    blocked_id = request.get("blocked_id")
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        INSERT INTO blocked_users (blocker_id, blocked_id, timestamp)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (blocker_id, blocked_id) DO NOTHING
+    ''', (blocker_id, blocked_id, datetime.now().isoformat()))
+    
+    conn.commit()
+    conn.close()
+    return {"status": "blocked"}
+
+@app.post("/users/unblock")
+async def unblock_user(request: dict):
+    blocker_id = request.get("blocker_id")
+    blocked_id = request.get("blocked_id")
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        DELETE FROM blocked_users 
+        WHERE blocker_id = %s AND blocked_id = %s
+    ''', (blocker_id, blocked_id))
+    
+    conn.commit()
+    conn.close()
+    return {"status": "unblocked"}
+
+@app.get("/users/{user_id}/blocked")
+async def get_blocked_users(user_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT blocked_id FROM blocked_users WHERE blocker_id = %s", (user_id,))
+    rows = cursor.fetchall() # List of tuples [(1,), (2,)]
+    
+    blocked_ids = [row[0] for row in rows]
+    conn.close()
+    return blocked_ids
+
+@app.put("/users/{user_id}")
+async def update_profile(user_id: int, request: dict):
+    name = request.get("name")
+    about = request.get("about") # Not in DB schema yet? Let's check DB init.
+    # Users table: id, email, name, avatar, status, lastSeen, synced, settings.
+    # 'about' is missing. Let's just update 'name' and 'status' (which is 'about' effectively sometimes, or we add 'about' column).
+    # 'status' in table corresponds to 'About' in WhatsApp usually.
+    
+    avatar = request.get("avatar")
+    status = request.get("about") # Map 'about' to 'status' column
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    fields = []
+    values = []
+    
+    if name:
+        fields.append("name = %s")
+        values.append(name)
+    if status is not None:
+        fields.append("status = %s")
+        values.append(status)
+    if avatar:
+        fields.append("avatar = %s")
+        values.append(avatar)
+        
+    values.append(user_id) # For WHERE clause
+    
+    if fields:
+        query = f"UPDATE users SET {', '.join(fields)}, synced = FALSE WHERE id = %s"
+        cursor.execute(query, tuple(values))
+        conn.commit()
+    
+    conn.close()
+    return {"status": "updated"}
+
+@app.post("/users/{user_id}/settings")
+async def update_settings(user_id: int, settings: dict):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Merge existing settings? For now, overwrite or partial update logic needed
+    # Let's read first
+    cursor.execute("SELECT settings FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
+    current_settings = {}
+    if row and row[0]:
+        try:
+            current_settings = json.loads(row[0])
+        except:
+            current_settings = {}
+            
+    # Update
+    current_settings.update(settings)
+    
+    cursor.execute("UPDATE users SET settings = %s WHERE id = %s", (json.dumps(current_settings), user_id))
+    conn.commit()
+    conn.close()
+    return {"status": "updated", "settings": current_settings}
+
+@app.get("/users/{user_id}/settings")
+async def get_settings(user_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT settings FROM users WHERE id = %s", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row and row[0]:
+        try:
+            return json.loads(row[0])
+        except:
+            return {}
+    return {}
+
+@app.post("/status")
+async def create_status(request: dict):
+    user_id = request.get("user_id")
+    type = request.get("type", "text")
+    content = request.get("content")
+    caption = request.get("caption", "")
+    
+    new_id = int(datetime.now().timestamp() * 1000)
+    timestamp = datetime.now().isoformat()
+    # Expire in 24 hours
+    expires_at = (datetime.now() +  json.timedelta(hours=24) if 'timedelta' in globals() else datetime.now()).isoformat() 
+    # Wait, need timedelta. Let's import it or use simple timestamp addition if possible.
+    # Actually explicit import is safer.
+    from datetime import timedelta
+    expires_at = (datetime.now() + timedelta(hours=24)).isoformat()
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        INSERT INTO status (id, user_id, type, content, caption, timestamp, expires_at, viewers, synced)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, '[]', FALSE)
+    ''', (new_id, user_id, type, content, caption, timestamp, expires_at))
+    
+    conn.commit()
+    conn.close()
+    
+    return {"status": "created", "id": new_id}
+
+@app.get("/status")
+async def get_statuses(user_id: int):
+    # Get active statuses from all users (MVP: everyone sees everyone)
+    # Ideally: Filter by contacts.
+    current_time = datetime.now().isoformat()
+    
+    conn = get_db_connection()
+    cursor = get_db_cursor(conn)
+    
+    # Fetch active statuses
+    cursor.execute('''
+        SELECT s.*, u.name as user_name, u.avatar as user_avatar 
+        FROM status s
+        JOIN users u ON s.user_id = u.id
+        WHERE s.expires_at > %s
+        ORDER BY s.timestamp ASC
+    ''', (current_time,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    # Group by user
+    grouped = {}
+    for row in rows:
+        uid = row['user_id']
+        if uid not in grouped:
+            grouped[uid] = {
+                "user_id": uid,
+                "name": row['user_name'],
+                "avatar": row['user_avatar'],
+                "stories": []
+            }
+        
+        story = dict(row)
+        # Parse viewers
+        try:
+            story['viewers'] = json.loads(story['viewers'])
+        except:
+            story['viewers'] = []
+            
+        del story['user_name']
+        del story['user_avatar']
+        grouped[uid]['stories'].append(story)
+        
+    return list(grouped.values())
+
+@app.post("/status/{status_id}/view")
+async def view_status(status_id: int, request: dict):
+    viewer_id = request.get("user_id")
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Fetch current viewers
+    cursor.execute("SELECT viewers FROM status WHERE id = %s", (status_id,))
+    row = cursor.fetchone()
+    
+    if row:
+        try:
+            viewers = json.loads(row[0])
+        except:
+            viewers = []
+            
+        if viewer_id not in viewers:
+            viewers.append(viewer_id)
+            cursor.execute("UPDATE status SET viewers = %s, synced = FALSE WHERE id = %s", (json.dumps(viewers), status_id))
+            conn.commit()
+            
+    conn.close()
+    return {"status": "viewed"}
 async def websocket_endpoint(websocket: WebSocket, chat_id: int, user_id: int):
+    # Check if user is blocked by anyone in the chat? 
+    # For now, allow connection, handle blocking at message level.
     await manager.connect(websocket, chat_id)
     try:
         while True:
@@ -1048,12 +1428,25 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int, user_id: int):
             try:
                 message_data = json.loads(data)
                 
-                # 1. Save to Postgres
+                # Check Blocking Logic
+                sender_id = message_data.get("sender", str(user_id))
+                
+                # 1. Fetch participants of this chat to check if any of them blocked the sender
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 
+                # ... (Simple Block Check: If 1-to-1, check other user)
+                # Optimization needed for production, but for MVP:
+                # We can do this check when saving to DB, or here.
+                
+                # 1. Save to Postgres
+                # ...
+                
+                # Let's add the blocking check inside the loop or before broadcast
+                
                 # Default values
                 msg_id = message_data.get("id", int(datetime.now().timestamp() * 1000))
+                # ... (rest of vars)
                 text = message_data.get("text", "")
                 sender = message_data.get("sender", str(user_id)) # Fallback to user_id path param
                 time_str = message_data.get("time", datetime.now().strftime("%H:%M"))
@@ -1062,8 +1455,37 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int, user_id: int):
                 file_name = message_data.get("filename", "")
                 file_size = message_data.get("size", "")
                 
+                # BLOCKING CHECK START
+                # Check if this chat is 1-1 and the other user blocked 'sender'
+                # Fetch chat type and participants
+                cursor.execute("SELECT type, participants FROM chats WHERE id = %s", (chat_id,))
+                chat_row = cursor.fetchone()
+                
+                is_blocked = False
+                if chat_row:
+                    chat_type = chat_row[0]
+                    participants = json.loads(chat_row[1])
+                    if chat_type == 'private':
+                        # Find the other person
+                        other_user_id = next((p['id'] for p in participants if str(p['id']) != str(sender)), None)
+                        if other_user_id:
+                            # Check if other_user blocked sender
+                            cursor.execute("SELECT 1 FROM blocked_users WHERE blocker_id = %s AND blocked_id = %s", (other_user_id, sender))
+                            if cursor.fetchone():
+                                is_blocked = True
+                
+                if is_blocked:
+                    # Don't save, don't broadcast. Maybe send error back to sender?
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "text": "You are blocked by this user."
+                    }))
+                    continue # Skip processing
+                # BLOCKING CHECK END
+                
                 cursor.execute('''
                     INSERT INTO messages (id, chat_id, text, sender, time, type, fileUrl, fileName, fileSize, synced)
+
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
                 ''', (
                     msg_id,

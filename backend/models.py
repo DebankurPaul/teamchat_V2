@@ -18,6 +18,8 @@ class Message(BaseModel):
     isVoice: bool = False
 
 class IdeaAnalysis(BaseModel):
+    text: str = ""
+    sender: str | int = "Anonymous"
     is_idea: bool
     category: Optional[str] = None
     priority: Optional[str] = None

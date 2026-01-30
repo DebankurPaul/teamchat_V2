@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import ChatWindow from './ChatWindow';
 import IdeaHub from './IdeaHub';
+import StatusTab from './StatusTab';
 import CalendarView from './CalendarView';
 
 import Login from './Login';
@@ -10,6 +11,7 @@ import Profile from './Profile';
 import ConfirmationModal from './ConfirmationModal';
 import Toast from './Toast';
 import { Edit2, Menu } from 'lucide-react';
+import CryptoService from '../services/CryptoService';
 
 const Layout = () => {
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -66,6 +68,13 @@ const Layout = () => {
       return () => {
         ws.close();
       };
+    }
+  }, [user]);
+
+  // key Init
+  useEffect(() => {
+    if (user) {
+      CryptoService.initialize(user).catch(err => console.error("Crypto Init Failed", err));
     }
   }, [user]);
 
@@ -219,19 +228,27 @@ const Layout = () => {
   };
 
 
-  const handleUpdateProfile = (newName) => {
-    if (!newName.trim()) return;
+  const handleUpdateProfile = (updates) => {
+    // updates = { name, about, avatar }
+    if (!updates) return;
 
     fetch(`${API_URL}/users/${user.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName })
+      body: JSON.stringify(updates)
     })
       .then(res => res.json())
-      .then(updatedUser => {
-        setUser(updatedUser);
+      .then(data => {
+        // Update local user state
+        // API returns { status: "updated" }, doesn't return full user.
+        // We should merge updates into local state.
+        setUser(prev => ({ ...prev, ...updates }));
+        showNotification("Profile updated successfully");
       })
-      .catch(err => console.error("Failed to update profile", err));
+      .catch(err => {
+        console.error("Failed to update profile", err);
+        showNotification("Failed to update profile");
+      });
   };
 
   const renderMainContent = () => {
@@ -251,6 +268,8 @@ const Layout = () => {
             Select a chat to start messaging
           </div>
         );
+      case 'status':
+        return <StatusTab currentUser={user} />;
       case 'ideas':
         return <IdeaHub />;
       case 'calendar':
@@ -303,6 +322,7 @@ const Layout = () => {
           currentUser={user}
           onBulkDelete={handleBulkDelete}
           showNotification={showNotification}
+          onUpdateProfile={handleUpdateProfile}
         />
 
       </div>

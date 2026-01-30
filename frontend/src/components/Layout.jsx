@@ -12,6 +12,7 @@ import ConfirmationModal from './ConfirmationModal';
 import Toast from './Toast';
 import { Edit2, Menu } from 'lucide-react';
 import CryptoService from '../services/CryptoService';
+import SetUsername from './SetUsername';
 
 const Layout = () => {
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -100,12 +101,26 @@ const Layout = () => {
       .catch(err => console.error("Failed to fetch public groups", err));
   }, [chats]); // Refresh when chats change (e.g. after creating a group)
 
+
   // Auth Flow
   if (!user) {
     if (isRegistering) {
       return <Register onRegister={(userData) => setUser(userData)} onSwitchToLogin={() => setIsRegistering(false)} showNotification={showNotification} />;
     }
     return <Login onLogin={(userData) => setUser(userData)} onSwitchToRegister={() => setIsRegistering(true)} showNotification={showNotification} />;
+  }
+
+  // Require Username
+  if (!user.username) {
+    return (
+      <SetUsername
+        user={user}
+        onUsernameSet={(newUsername) => {
+          setUser(prev => ({ ...prev, username: newUsername }));
+          showNotification(`Welcome, ${newUsername}!`);
+        }}
+      />
+    );
   }
 
   const handleSelectChat = (chat) => {

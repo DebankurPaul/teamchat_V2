@@ -331,15 +331,16 @@ async def login(user_data: dict, background_tasks: BackgroundTasks):
         "phone": phone,
         "avatar": f"https://ui-avatars.com/api/?name={user_data.get('name', 'User')}&background=random",
         "status": "offline",
-        "lastSeen": None
+        "lastSeen": None,
+        "username": None
     }
     
     # 1. Save to Postgres
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO users (id, name, email, phone, avatar, status, lastSeen, synced)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE)
+        INSERT INTO users (id, name, email, phone, avatar, status, lastSeen, username, synced)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE)
     ''', (
         new_user["id"],
         new_user["name"],
@@ -347,7 +348,8 @@ async def login(user_data: dict, background_tasks: BackgroundTasks):
         new_user["phone"],
         new_user["avatar"],
         new_user["status"],
-        new_user["lastSeen"]
+        new_user["lastSeen"],
+        new_user["username"]
     ))
     conn.commit()
     conn.close()
@@ -374,6 +376,34 @@ async def update_user(user_id: int, user_data: dict):
         user.update(updates)
         return user
     return user
+
+@app.post("/set_username")
+async def set_username(request: dict):
+    user_id = request.get("user_id")
+    username = request.get("username")
+    
+    if not user_id or not username:
+        raise HTTPException(status_code=400, detail="Missing user_id or username")
+
+    # Validate username format (simple check)
+    if len(username) < 3:
+        raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Check uniqueness
+    cursor.execute("SELECT 1 FROM users WHERE username = %s", (username,))
+    if cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=400, detail="Username already taken")
+        
+    # Update user
+    cursor.execute("UPDATE users SET username = %s, synced = FALSE WHERE id = %s", (username, user_id))
+    conn.commit()
+    conn.close()
+    
+    return {"message": "Username set successfully", "username": username}
 
 @app.get("/ideas")
 async def get_ideas():

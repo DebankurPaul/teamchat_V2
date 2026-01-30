@@ -1,96 +1,63 @@
-import re
-from datetime import datetime, timedelta
-from models import IdeaAnalysis
+import os
+import requests
+import json
+from dotenv import load_dotenv
+from pathlib import Path
 
-def analyze_text(text: str) -> IdeaAnalysis:
-    text = text.lower()
-    
-    # 1. Auto-detect Idea
-    idea_keywords = ["idea", "suggestion", "what if", "propose", "should we"]
-    is_idea = any(keyword in text for keyword in idea_keywords)
-    
-    if not is_idea:
-        return IdeaAnalysis(is_idea=False)
-    
-    # 2. Smart Categorization
-    category = "General"
-    if any(w in text for w in ["blog", "post", "article"]):
-        category = "Blog"
-    elif any(w in text for w in ["social", "instagram", "twitter", "linkedin"]):
-        category = "Social"
-    elif any(w in text for w in ["event", "meetup", "party", "retreat"]):
-        category = "Event"
-    elif any(w in text for w in ["campaign", "launch", "ad"]):
-        category = "Campaign"
-        
-    # 3. Priority Scoring
-    priority = "Low"
-    if any(w in text for w in ["urgent", "asap", "immediately", "critical"]):
-        priority = "High"
-    elif any(w in text for w in ["soon", "next week", "important"]):
-        priority = "Medium"
-        
-    # 4. Viability Score (Simple heuristic based on length/detail)
-    word_count = len(text.split())
-    viability_score = min(10, max(1, word_count // 3))
-    
-    # 5. Deadline Extraction (Regex)
-    deadline = None
-    deadline_match = re.search(r"(by|on|before) (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)", text)
-    if deadline_match:
-        # Simplified date logic for demo
-        deadline = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d") 
-        
-    # 6. Action Suggestions
-    action_suggestion = "Create a draft"
-    if category == "Event":
-        action_suggestion = "Set a date and budget"
-    elif category == "Campaign":
-        action_suggestion = "Define target audience"
-        
-    return IdeaAnalysis(
-        is_idea=True,
-        category=category,
-        priority=priority,
-        viability_score=viability_score,
-        deadline=deadline,
-        action_suggestion=action_suggestion
-    )
+# Explicitly load .env from the backend directory
+env_path = Path(__file__).parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
-def analyze_file_content(filename: str, content_preview: str) -> IdeaAnalysis:
-    text = (filename + " " + content_preview).lower()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+def analyze_content(content: str):
+    if not GROQ_API_KEY:
+        print("Warning: GROQ_API_KEY not found. Using dummy analysis.")
+        return False, 0.0, "", ""
+
+    if not content or len(content.strip()) < 10:
+        return False, 0.0, "", ""
+
+    system_prompt = """
+    You are an expert Idea Extractor. Your job is to analyze the user's input (which could be a message or file content) and determine if it contains a Startup Idea, Business Concept, or Project Idea.
     
-    category = "General"
-    if any(w in text for w in ["report", "doc", "pdf"]):
-        category = "Document"
-    if any(w in text for w in ["budget", "finance", "cost"]):
-        category = "Finance"
-    elif any(w in text for w in ["design", "mockup", "ui", "ux"]):
-        category = "Design"
+    Output JSON ONLY:
+    {
+        "is_idea": boolean,
+        "confidence": float (0.0 to 1.0),
+        "summary": "Short 1-sentence summary of the idea",
+        "category": "Technology" | "Health" | "Finance" | "Education" | "Lifestyle" | "Other"
+    }
+    """
+
+    payload = {
+        "model": "llama-3.1-8b-instant",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": content[:15000]} 
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
         
-    priority = "Medium"
-    if "final" in text or "urgent" in text:
-        priority = "High"
-        
-    # Extract deadline
-    deadline = None
-    if "q4" in text:
-        deadline = "2025-12-31"
-    elif "next week" in text:
-        deadline = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-        
-    # Generate a better suggestion based on content
-    action_suggestion = f"Review {filename}"
-    if len(content_preview) > 50:
-        # Return a larger chunk of the content as the "extracted idea"
-        # We'll limit to 2000 chars to keep the UI responsive, but it's much more than before.
-        action_suggestion = f"Extracted Content:\n\n{content_preview[:15000]}..." if len(content_preview) > 15000 else f"Extracted Content:\n\n{content_preview}"
+        if response.status_code != 200:
+            print(f"Groq API Error ({response.status_code}): {response.text}")
+            return False, 0.0, "", ""
             
-    return IdeaAnalysis(
-        is_idea=True,
-        category=category,
-        priority=priority,
-        viability_score=8, 
-        deadline=deadline,
-        action_suggestion=action_suggestion
-    )
+        result = response.json()
+        content_str = result['choices'][0]['message']['content']
+        data = json.loads(content_str)
+        
+        return data.get("is_idea", False), data.get("confidence", 0.0), data.get("summary", ""), data.get("category", "General")
+
+    except Exception as e:
+        print(f"Groq Analysis Error: {e}")
+        return False, 0.0, "", ""

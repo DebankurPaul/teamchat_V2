@@ -30,8 +30,10 @@ const Login = ({ onLogin, onSwitchToRegister, showNotification }) => {
         e.preventDefault();
         setLoading(true);
 
-        // Normalize phone (basic)
-        const phoneNumber = phone.startsWith('+') ? phone : `+${phone}`;
+        // Normalize phone: remove all non-numeric chars except leading +
+        const phoneNumber = phone.replace(/[^+\d]/g, '');
+        // Ensure + prefix if missing (though regex above handles keeps it, this ensures valid format)
+        const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
 
         try {
             if (MOCK_AUTH_MODE) {
@@ -61,7 +63,9 @@ const Login = ({ onLogin, onSwitchToRegister, showNotification }) => {
 
         try {
             let idToken = null;
-            let finalPhone = phone.startsWith('+') ? phone : `+${phone}`;
+            // Normalize: remove all non-numeric chars except leading +
+            let finalPhone = phone.replace(/[^+\d]/g, '');
+            if (!finalPhone.startsWith('+')) finalPhone = `+${finalPhone.replace(/^\+/, '')}`;
 
             if (MOCK_AUTH_MODE) {
                 if (otp === '123456') {

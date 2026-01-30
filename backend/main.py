@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from models import Message, IdeaAnalysis, FileInput
 from websocket_manager import ConnectionManager
-from ai_service import analyze_text, analyze_file_content
+from ai_service import analyze_content
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime
@@ -19,16 +19,19 @@ from redis_client import redis_client
 load_dotenv()
 
 # Initialize Firebase
+db = None
 if not firebase_admin._apps:
     # Get credentials path from env or default to file
     cred_path = os.getenv("FIREBASE_CREDENTIALS", "serviceAccountKey.json")
     if not os.path.exists(cred_path):
-        print(f"Warning: Firebase credentials not found at {cred_path}")
+        print(f"Warning: Firebase credentials not found at {cred_path}. Firestore sync disabled.")
     else:
-        cred = credentials.Certificate(cred_path)
-        firebase_admin.initialize_app(cred)
-
-db = firestore.client()
+        try:
+            cred = credentials.Certificate(cred_path)
+            firebase_admin.initialize_app(cred)
+            db = firestore.client()
+        except Exception as e:
+            print(f"Failed to initialize Firebase: {e}")
 
 app = FastAPI()
 
@@ -60,6 +63,9 @@ app.add_middleware(
 
 # --- Sync Logic ---
 def sync_to_firebase():
+    if not db:
+        return # Skip sync if firebase not configured
+        
     print("Starting sync to Firebase...")
     conn = get_db_connection()
     cursor = get_db_cursor(conn)
@@ -314,7 +320,9 @@ async def login(user_data: dict, background_tasks: BackgroundTasks):
 
     existing_user = None
     if phone:
+        print(f"DEBUG: Login attempting lookup for phone: '{phone}'")
         existing_user = get_user_by_phone(phone)
+        print(f"DEBUG: Lookup Result: {existing_user}")
     elif email:
         existing_user = get_user_by_email(email)
     
@@ -398,8 +406,8 @@ async def set_username(request: dict):
         conn.close()
         raise HTTPException(status_code=400, detail="Username already taken")
         
-    # Update user
-    cursor.execute("UPDATE users SET username = %s, synced = FALSE WHERE id = %s", (username, user_id))
+    # Update user (username AND name)
+    cursor.execute("UPDATE users SET username = %s, name = %s, synced = FALSE WHERE id = %s", (username, username, user_id))
     conn.commit()
     conn.close()
     
@@ -583,36 +591,35 @@ async def join_chat(request: dict, background_tasks: BackgroundTasks):
 @app.get("/chats/{chat_id}/messages")
 async def get_messages(chat_id: int, user_id: int = None):
     conn = get_db_connection()
-    cursor = get_db_cursor(conn)
-    cursor.execute("SELECT * FROM messages WHERE chat_id = %s ORDER BY id ASC", (chat_id,))
-    messages = []
-    
-    import json
-    
-    for row in cursor.fetchall():
-        msg = dict(row)
+    try:
+        cursor = get_db_cursor(conn)
+        cursor.execute("SELECT * FROM messages WHERE chat_id = %s ORDER BY id ASC", (chat_id,))
+        messages = []
         
-        # Check 'Delete for Me' logic
-        if user_id and msg.get("deleted_for"):
-            try:
-                deleted_for_list = json.loads(msg["deleted_for"])
-                # print(f"DEBUG: msg {msg['id']} deleted_for={deleted_for_list} user_id={user_id}")
-                if any(str(u) == str(user_id) for u in deleted_for_list):
-                    # print(f"DEBUG: Skipping msg {msg['id']}")
-                    continue # Skip this message
-            except Exception as e:
-                print(f"DEBUG: Error parsing deleted_for: {e}")
-                pass
-                
-        # Parse replyTo JSON if it exists
-        if msg.get("replyTo"):
-            try:
-                msg["replyTo"] = json.loads(msg["replyTo"])
-            except:
-                msg["replyTo"] = None
-        messages.append(msg)
-    conn.close()
-    return messages
+        import json
+        
+        for row in cursor.fetchall():
+            msg = dict(row)
+            
+            # Check 'Delete for Me' logic
+            if user_id and msg.get("deleted_for"):
+                try:
+                    deleted_for_list = json.loads(msg["deleted_for"])
+                    if any(str(u) == str(user_id) for u in deleted_for_list):
+                        continue # Skip this message
+                except Exception as e:
+                    pass
+                    
+            # Parse replyTo JSON if it exists
+            if msg.get("replyTo"):
+                try:
+                    msg["replyTo"] = json.loads(msg["replyTo"])
+                except:
+                    msg["replyTo"] = None
+            messages.append(msg)
+        return messages
+    finally:
+        conn.close()
 
 @app.post("/chats/{chat_id}/messages")
 async def send_message(chat_id: int, message: Message, background_tasks: BackgroundTasks):
@@ -722,6 +729,7 @@ async def send_message(chat_id: int, message: Message, background_tasks: Backgro
     return msg_dict
 
 def sync_clear_messages(chat_id: int):
+    if not db: return
     chats_ref = db.collection("chats")
     query = chats_ref.where("id", "==", chat_id).limit(1).stream()
     for doc in query:
@@ -767,6 +775,7 @@ async def clear_chat_messages(chat_id: int, background_tasks: BackgroundTasks):
     return {"message": "Chat cleared"}
 
 def sync_delete_chat(chat_id: int):
+    if not db: return
     chats_ref = db.collection("chats")
     query = chats_ref.where("id", "==", chat_id).limit(1).stream()
     for doc in query:
@@ -1049,97 +1058,110 @@ async def get_participants(chat_id: int):
             return []
     return []
 
-@app.post("/upload")
-def upload_file(file: UploadFile = File(...)):
-    file_location = f"uploads/{file.filename}"
-    with open(file_location, "wb+") as file_object:
-        shutil.copyfileobj(file.file, file_object)
-    
-    return {"url": f"/uploads/{file.filename}"}
+
+
+from ai_service import analyze_content
+from file_extractor import extract_text
+import re
 
 @app.post("/analyze-message")
 async def analyze_message_endpoint(analysis_request: IdeaAnalysis):
-    is_idea, confidence = analyze_text(analysis_request.text)
+    text_to_analyze = analysis_request.text
+    
+    # Check if text looks like a filename we have access to
+    valid_extensions = ('.txt', '.pdf', '.docx', '.pptx', '.html', '.htm')
+    if text_to_analyze.lower().endswith(valid_extensions):
+        # Construct full path to uploads
+        file_path = os.path.join("uploads", text_to_analyze)
+        if os.path.exists(file_path):
+            print(f"Extracting text from file: {file_path}")
+            extracted_text = extract_text(file_path)
+            if extracted_text and not extracted_text.startswith("Error"):
+                 # Limit text to avoid token limits (approx 15k chars)
+                text_to_analyze = extracted_text[:15000]
+            else:
+                print(f"Failed to extract text or empty: {extracted_text}")
+
+    print(f"Analyzing content (length={len(text_to_analyze)}): {text_to_analyze[:50]}...")
+    
+    is_idea, confidence, summary, category = analyze_content(text_to_analyze)
     
     if is_idea:
         # Save to Postgres ideas
         new_id = int(datetime.now().timestamp() * 1000)
         timestamp = datetime.now().isoformat()
         
-        new_idea = {
-            "id": new_id,
-            "text": analysis_request.text, # Maps to content/text
-            "category": analysis_request.category or "General",
-            "votes": 0,
-            "timestamp": timestamp,
-            "is_analyzed": True
-        }
+        # Use summary as the main text for the idea card if it's long content
+        idea_text = summary if len(text_to_analyze) > 200 else text_to_analyze
         
-        # We need to map 'text' to DB 'text', 'category' to 'category'
-        # Note: The DB schema for 'ideas' is: id, text, category, votes, timestamp, is_analyzed, synced
         conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute('''
             INSERT INTO ideas (id, text, category, votes, timestamp, is_analyzed, synced)
             VALUES (%s, %s, %s, %s, %s, %s, FALSE)
-        ''', (
-            new_id,
-            new_idea["text"],
-            new_idea["category"],
-            new_idea["votes"],
-            new_idea["timestamp"],
-            new_idea["is_analyzed"]
-        ))
+        ''', (new_id, idea_text, category, 0, timestamp, True))
+        
         conn.commit()
         conn.close()
         
-    return {"is_idea": is_idea, "confidence": confidence}
-
-from file_extractor import extract_text
+        return {
+            "is_idea": True,
+            "confidence": confidence,
+            "category": category,
+            "summary": summary
+        }
+    
+    return {"is_idea": False, "confidence": confidence}
 
 @app.post("/analyze-file")
-async def analyze_file_endpoint(file_input: FileInput):
-    file_path = f"uploads/{file_input.filename}"
+async def analyze_file_endpoint(request: dict):
+    print(f"DEBUG: analyze_file_endpoint called with {request}")
+    filename = request.get("filename")
+    if not filename:
+        raise HTTPException(status_code=400, detail="Filename required")
+        
+    file_path = os.path.join("uploads", filename)
+    print(f"DEBUG: Checking file path: {file_path}")
+    if not os.path.exists(file_path):
+        print(f"DEBUG: File not found at {file_path}")
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+        
+    print(f"Analyzing file: {file_path}")
+    extracted_text = extract_text(file_path)
     
-    try:
-        # Extract text content
-        extracted_text = extract_text(file_path)
+    if not extracted_text or len(extracted_text) < 10:
+         return {"is_idea": False, "confidence": 0.0, "message": "No text extracted"}
+         
+    # Analyze
+    text_to_analyze = extracted_text[:15000]
+    is_idea, confidence, summary, category = analyze_content(text_to_analyze)
+    
+    if is_idea:
+        new_id = int(datetime.now().timestamp() * 1000)
+        timestamp = datetime.now().isoformat()
         
-        if not extracted_text or "Unsupported" in extracted_text:
-            if not extracted_text:
-                extracted_text = f"File: {file_input.filename}"
-                
-        # Analyze the extracted text
-        analysis = analyze_text(extracted_text)
+        idea_text = summary if summary else f"Idea from {filename}"
         
-        # Force is_idea to True since user explicitly requested it
-        analysis.is_idea = True
+        conn = get_db_connection()
+        cursor = conn.cursor()
         
-        if analysis.is_idea:
-             new_id = int(datetime.now().timestamp() * 1000)
-             conn = get_db_connection()
-             cursor = conn.cursor()
-             
-             cursor.execute('''
-                INSERT INTO ideas (id, text, category, votes, timestamp, is_analyzed, synced)
-                VALUES (%s, %s, %s, %s, %s, %s, FALSE)
-             ''', (
-                new_id,
-                extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text, # text column
-                analysis.category or "File",
-                0, # votes
-                datetime.now().isoformat(),
-                True # is_analyzed
-             ))
-             conn.commit()
-             conn.close()
-             
-        return analysis
-    except Exception as e:
-        print(f"Error analyzing file: {e}")
-        # Fallback to simple analysis
-        return {"is_idea": False, "error": str(e)}
+        cursor.execute('''
+            INSERT INTO ideas (id, text, category, votes, timestamp, is_analyzed, synced)
+            VALUES (%s, %s, %s, %s, %s, %s, FALSE)
+        ''', (new_id, idea_text, category, 0, timestamp, True))
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "is_idea": True,
+            "confidence": confidence,
+            "category": category,
+            "summary": summary
+        }
+        
+    return {"is_idea": False, "confidence": confidence}
 
 
 @app.post("/upload")
@@ -1154,6 +1176,57 @@ async def upload_file(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
         
     return {"url": f"/uploads/{unique_name}", "filename": unique_name}
+
+@app.get("/ideas")
+async def get_ideas():
+    conn = get_db_connection()
+    cursor = get_db_cursor(conn)
+    
+    cursor.execute("SELECT * FROM ideas ORDER BY timestamp DESC")
+    rows = cursor.fetchall()
+    
+    ideas = []
+    for row in rows:
+        idea = dict(row)
+        # Ensure we have required fields for frontend
+        if 'title' not in idea:
+            # Generate a title if missing (or use summary/text snippet)
+            text = idea.get('text', '')
+            idea['title'] = text[:50] + "..." if len(text) > 50 else text
+            
+        # Map DB fields to Frontend fields if needed
+        # Frontend expects: id, title, category, priority, status, color
+        if 'color' not in idea:
+            # Assign random pastel color based on category
+            category = idea.get('category', 'Other')
+            colors = {
+                'Technology': 'bg-blue-100',
+                'Health': 'bg-green-100',
+                'Finance': 'bg-yellow-100',
+                'Education': 'bg-purple-100', 
+                'Lifestyle': 'bg-pink-100'
+            }
+            idea['color'] = colors.get(category, 'bg-gray-100')
+            
+        if 'priority' not in idea:
+            idea['priority'] = 'Medium' # Default
+            
+        if 'status' not in idea:
+             idea['status'] = 'New'
+
+        ideas.append(idea)
+        
+    conn.close()
+    return ideas
+
+@app.delete("/ideas/{idea_id}")
+async def delete_idea(idea_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM ideas WHERE id = %s", (idea_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "deleted"}
 
 
 @app.post("/chats/{chat_id}/messages/read")

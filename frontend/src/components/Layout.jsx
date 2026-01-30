@@ -116,7 +116,7 @@ const Layout = () => {
       <SetUsername
         user={user}
         onUsernameSet={(newUsername) => {
-          setUser(prev => ({ ...prev, username: newUsername }));
+          setUser(prev => ({ ...prev, username: newUsername, name: newUsername }));
           showNotification(`Welcome, ${newUsername}!`);
         }}
       />

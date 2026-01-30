@@ -1,0 +1,14 @@
+Startup Idea: SmartGarden AI
+
+Problem:
+Many urban dwellers want to grow their own food but lack the knowledge, space, or time to maintain a garden. Plants often die due to over/under watering or lack of proper nutrients.
+
+Solution:
+SmartGarden AI is a modular, vertical gardening system integrated with IoT sensors and an AI app.
+- Hardware: Stackable planters with built-in moisture, pH, and light sensors.
+- Software: An app that uses the sensor data to automatically dispense water and nutrients.
+- AI Feature: Take a photo of your plant, and the AI diagnoses diseases/pests and suggests organic remedies. It also predicts harvest times.
+
+Business Model:
+- Direct-to-consumer sales of the hardware units.
+- Subscription model for nutrient refills and premium app features (expert consultations).

@@ -149,7 +149,14 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                 method: 'POST',
                 body: formData
             });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.detail || "Upload failed");
+            }
+
             const data = await response.json();
+            if (!data.url) throw new Error("Server returned no file URL");
 
             // 3. Prepare Final Message
             const finalMessage = {
@@ -954,13 +961,14 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                                         className="flex items-center space-x-3 cursor-pointer hover:bg-black/5 p-2 rounded-lg transition-colors relative group/file"
                                         onClick={async (e) => {
                                             e.stopPropagation();
-                                            if (!msg.fileUrl) {
+                                            const fileUrlRaw = msg.fileUrl || msg.fileurl;
+                                            if (!fileUrlRaw) {
                                                 showNotification("File URL missing");
                                                 return;
                                             }
 
                                             // URL Construction Logic
-                                            let fileUrl = msg.fileUrl;
+                                            let fileUrl = fileUrlRaw;
                                             console.log("Original URL:", fileUrl);
                                             console.log("API_URL:", API_URL);
 
@@ -972,7 +980,7 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                                             console.log("Final URL:", fileUrl);
 
                                             // Check file type
-                                            const currentFileName = msg.filename || msg.fileName || "";
+                                            const currentFileName = msg.filename || msg.fileName || msg.filename || "";
                                             const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(currentFileName);
 
                                             if (isImage) {
@@ -986,7 +994,7 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                                                     const url = window.URL.createObjectURL(blob);
                                                     const link = document.createElement('a');
                                                     link.href = url;
-                                                    link.download = msg.filename || msg.fileName || 'download';
+                                                    link.download = currentFileName || 'download';
                                                     document.body.appendChild(link);
                                                     link.click();
                                                     document.body.removeChild(link);
@@ -998,14 +1006,14 @@ const ChatWindow = ({ chat, chats, userStatuses, currentUser, onBack, onDeleteCh
                                             }
                                         }}
                                     >
-                                        <div className={`p-2 rounded-lg ${/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.filename || msg.fileName) ? 'bg-purple-100 text-purple-500' : 'bg-red-100 text-red-500'}`}>
-                                            {/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.filename || msg.fileName) ? <Image size={24} /> : <Paperclip size={24} />}
+                                        <div className={`p-2 rounded-lg ${/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.filename || msg.fileName || msg.filename) ? 'bg-purple-100 text-purple-500' : 'bg-red-100 text-red-500'}`}>
+                                            {/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.filename || msg.fileName || msg.filename) ? <Image size={24} /> : <Paperclip size={24} />}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <p className="font-medium text-gray-800 truncate text-sm">{msg.filename || msg.fileName || "Unknown File"}</p>
-                                            <p className="text-xs text-gray-500">{msg.size || msg.fileSize || "Unknown size"}</p>
+                                            <p className="font-medium text-gray-800 truncate text-sm">{msg.filename || msg.fileName || msg.filename || "Unknown File"}</p>
+                                            <p className="text-xs text-gray-500">{msg.size || msg.fileSize || msg.filesize || "Unknown size"}</p>
                                         </div>
-                                        <button className="opacity-0 group-hover/file:opacity-100 absolute -left-10 top-2 bg-yellow-100 text-yellow-700 p-1.5 rounded-full shadow-sm hover:bg-yellow-200 transition-opacity" title="Mark as Idea" onClick={(e) => { e.stopPropagation(); handleAnalyzeFile(msg.filename || msg.fileName); }}>
+                                        <button className="opacity-0 group-hover/file:opacity-100 absolute -left-10 top-2 bg-yellow-100 text-yellow-700 p-1.5 rounded-full shadow-sm hover:bg-yellow-200 transition-opacity" title="Mark as Idea" onClick={(e) => { e.stopPropagation(); const url = msg.fileUrl || msg.fileurl; const serverFilename = url ? url.split('/').pop() : (msg.filename || msg.fileName); console.log("Did click analyze", serverFilename); handleAnalyzeFile(serverFilename); }}>
                                             <Lightbulb size={16} />
                                         </button>
                                     </div>
